@@ -1,0 +1,12 @@
+# never commit course data
+data/
+*.xlsx
+*.tsv
+*.parquet
+*.fasta
+*.fa
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.vscode/

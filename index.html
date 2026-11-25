@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JE2 Jump</title>
+  <meta name="description" content="A small platformer about the Bio253 S. aureus JE2 proteomics course: play anc, stk or stp through TSB, SNpulse and SN.">
+  <link rel="stylesheet" href="style_mval.css">
+</head>
+<body>
+  <main>
+    <h1>JE2 Jump</h1>
+    <div id="stage">
+      <canvas id="game" width="960" height="544" aria-label="JE2 Jump game"></canvas>
+      <div id="touch" hidden>
+        <button data-key="left" aria-label="left">◀</button>
+        <button data-key="right" aria-label="right">▶</button>
+        <button data-key="jump" class="jump" aria-label="jump">⤒</button>
+      </div>
+    </div>
+    <p class="help">
+      <kbd>←</kbd><kbd>→</kbd> / <kbd>A</kbd><kbd>D</kbd> move ·
+      <kbd>Space</kbd> / <kbd>↑</kbd> / <kbd>W</kbd> jump (press again in the air for a double jump) ·
+      <kbd>P</kbd> pause · <kbd>Enter</kbd> continue
+    </p>
+    <p class="small">
+      Inspired by the Bio253 block course <em>S. aureus</em> JE2 proteomics data (genotypes anc / stk / stp;
+      media TSB / SNpulse / SN). Game mechanics are metaphors, not biological claims; see the README.
+    </p>
+  </main>
+  <script src="js/facts_mval.js"></script>
+  <script src="js/levels_mval.js"></script>
+  <script src="js/game_mval.js"></script>
+</body>
+</html>
