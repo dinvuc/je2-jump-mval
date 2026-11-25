@@ -94,12 +94,13 @@ function retryCheckpoint() {
   snapCamera(); setState('play');
   toast(penalty ? 'Stock restored · +3 seconds. R retries instantly; medals use your full run time.' : 'Study stock restored · no time penalty.', 180);
 }
-// Restart part 2 from its gate: the run (time, score, replicates, pickups) goes
-// back to how it was when you walked through the gate.
+// Restart part 2 from its gate: the run (time, score, pickups) goes back to how
+// it was when you walked through the gate, with all three replicates restored.
 function restartPart() {
   const start = L.stageStart;
   restoreSnapshot(start.checkpoint);
-  L.checkpoint = start.checkpoint;
+  P.reps = 3;
+  L.checkpoint = structuredClone({ world: start.checkpoint.world, player: P });
   L.time = start.time; L.retries++;
   L.recording.length = Math.min(L.recording.length, start.samples); L.ghostIndex = 0;
   L.bannerT = 200; G.iris = 45;

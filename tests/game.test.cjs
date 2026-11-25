@@ -52,8 +52,9 @@ check('failing in part 2 restarts part 2 from the gate, not the whole map', () =
   assert.equal(run('G.state'),'gameOver'); run('draw();');
   run('pressed.ok=true; update();');
   assert.equal(run('G.state'),'play'); assert.equal(run('L.stage'),1);
-  assert.equal(run('L.time'),1200); assert.equal(run('L.points'),500); assert.equal(run('P.reps'),2);
+  assert.equal(run('L.time'),1200); assert.equal(run('L.points'),500); assert.equal(run('P.reps'),3);
   assert(run('P.x === L.respawn.x')); assert.equal(run('L.retries'),1); assert.equal(run('L.bannerT'),200);
+  run("P.reps=1; retryCheckpoint();"); assert.equal(run('P.reps'),3); assert.equal(run('L.stage'),1);
   // an expired pulse in part 2 also goes back to the part 2 gate
   reset(1); run("L.time=600; var gate=L.ents.find(e=>e.type==='stage'); P.x=gate.x; P.y=gate.y; updateEntities(); L.time=L.timeLimit*60; retryCheckpoint();");
   assert.equal(run('L.stage'),1); assert.equal(run('L.time'),600); assert.equal(run('G.state'),'play');

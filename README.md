@@ -29,7 +29,8 @@ it saves a stock (like a checkpoint) and moves you straight into part 2 of the s
 map. Time, score, replicates, pickups and power-ups carry over; there is no
 results screen in between. The gate also works as a restart point: if you fail
 in part 2 (n = 0 or the pulse runs out), Enter on the game-over screen restarts
-part 2 from the gate, with the time, score and replicates you had there. The
+part 2 from the gate with all three replicates back; time, score and pickups
+return to what you had at the gate. The
 pause menu offers "Restart part 2" as well. Only part 1 restarts the whole map.
 
 1. **TSB — the nutrient garden (part 1: 88 × 30 tiles, part 2: 84 × 40):**
