@@ -66,27 +66,45 @@ function captureCheckpoint() {
   for (const field of CHECKPOINT_FIELDS) world[field] = L[field];
   L.checkpoint = structuredClone({ world, player: P });
 }
+// Put the world and the player back to a saved stock and clear transient effects.
+function restoreSnapshot(snapshot) {
+  const saved = structuredClone(snapshot);
+  Object.assign(L, saved.world); P = saved.player;
+  Object.assign(L, { fx: [], pops: [], callouts: [], shots: [], combo: 0, comboT: 0,
+    abWarn: 0, abOn: 0, abExpose: 0, coughing: 0, coughWarn: 0, coughFlash: 0, goalMsgT: 0 });
+  L.jiggle.clear(); P.inv = 90; P.dash = 0; P.damageT = 0;
+  for (const k in keys) keys[k] = false;
+  G.hitStop = 0; G.shake = 0; G.failReason = '';
+}
 function retryCheckpoint() {
   if (!L || !L.checkpoint) return;
   const penalty = L.difficulty === 0 ? 0 : 180;
   if (L.timeLimit && L.time / 60 + penalty / 60 >= L.timeLimit) {
+    if (L.stage > 0) { restartPart(); return; }   // the part 2 gate still counts
     loadLevel(G.levelIdx); setState('play'); return;
   }
-  const saved = structuredClone(L.checkpoint);
   const oldPosition = [P.x, P.y, P.face];
-  Object.assign(L, saved.world); P = saved.player;
+  restoreSnapshot(L.checkpoint);
   L.time += penalty; L.retries++;
   if (penalty && L.recording.length < 11998) {
     L.recording.push([L.time - 1, Math.round(oldPosition[0]), Math.round(oldPosition[1]), oldPosition[2], L.stage],
       [L.time, Math.round(P.x), Math.round(P.y), P.face, L.stage]);
   }
-  Object.assign(L, { fx: [], pops: [], shots: [], combo: 0, comboT: 0,
-    abWarn: 0, abOn: 0, abExpose: 0, coughing: 0, coughWarn: 0, coughFlash: 0, goalMsgT: 0 });
-  L.jiggle.clear(); P.inv = 90; P.dash = 0; P.damageT = 0;
-  for (const k in keys) keys[k] = false;
-  G.hitStop = 0; G.shake = 0; G.failReason = ''; G.iris = 0;
+  G.iris = 0;
   snapCamera(); setState('play');
   toast(penalty ? 'Stock restored · +3 seconds. R retries instantly; medals use your full run time.' : 'Study stock restored · no time penalty.', 180);
+}
+// Restart part 2 from its gate: the run (time, score, replicates, pickups) goes
+// back to how it was when you walked through the gate.
+function restartPart() {
+  const start = L.stageStart;
+  restoreSnapshot(start.checkpoint);
+  L.checkpoint = start.checkpoint;
+  L.time = start.time; L.retries++;
+  L.recording.length = Math.min(L.recording.length, start.samples); L.ghostIndex = 0;
+  L.bannerT = 200; G.iris = 45;
+  snapCamera(); setState('play');
+  toast(`Part ${L.stage + 1} restarted from the gate.`, 180);
 }
 
 function recordRun() {

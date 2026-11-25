@@ -27,7 +27,10 @@ locked gates or teleport channels.
 Every map has **two parts**. Part 1 ends at a glowing "PART 2" vial: walking into
 it saves a stock (like a checkpoint) and moves you straight into part 2 of the same
 map. Time, score, replicates, pickups and power-ups carry over; there is no
-results screen in between. Retrying in part 2 returns to its start.
+results screen in between. The gate also works as a restart point: if you fail
+in part 2 (n = 0 or the pulse runs out), Enter on the game-over screen restarts
+part 2 from the gate, with the time, score and replicates you had there. The
+pause menu offers "Restart part 2" as well. Only part 1 restarts the whole map.
 
 1. **TSB — the nutrient garden (part 1: 88 × 30 tiles, part 2: 84 × 40):**
    Part 1 is a tutorial in three rooms. Steps, a first gap and low debris lead
@@ -120,7 +123,8 @@ and use Enter/Space to select it, or click/tap it, then choose a strain to start
 **Checkpoint retry (R):** restore the world, inventory and replicates saved at the
 last cryo-vial, or the starting position. Time continues and adds a 3 s penalty.
 Retried runs cannot earn the keep-all-replicates star. An expired SNpulse deadline
-starts a fresh attempt. On the game-over screen, tap the footer to retry the stock.
+starts a fresh attempt (from the part 2 gate if you already reached part 2). On
+the game-over screen, tap the footer to retry the stock.
 
 **Antibiotic waves (CF):** a 3 s warning precedes a 4 s inhaled mist. Take cover
 under a floor within 10 tiles above you. Exposed *P. aeruginosa* die; the alginate

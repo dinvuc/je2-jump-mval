@@ -45,6 +45,25 @@ check('part 1 ends at a gate that saves a stock and carries the run into part 2'
     run('draw(); for (let i=0;i<220;i++) updateFx(); draw();'); assert.equal(run('L.bannerT'),0);
   }
 });
+check('failing in part 2 restarts part 2 from the gate, not the whole map', () => {
+  // n = 0, then Enter on the game-over screen
+  reset(2); run("L.time=1200; L.points=500; P.reps=2; var gate=L.ents.find(e=>e.type==='stage'); P.x=gate.x; P.y=gate.y; updateEntities();");
+  run("L.time=3000; L.points=900; P.x+=300; L.ents.find(e=>e.type==='check').on=true; P.reps=1; loseReplicate('test');");
+  assert.equal(run('G.state'),'gameOver'); run('draw();');
+  run('pressed.ok=true; update();');
+  assert.equal(run('G.state'),'play'); assert.equal(run('L.stage'),1);
+  assert.equal(run('L.time'),1200); assert.equal(run('L.points'),500); assert.equal(run('P.reps'),2);
+  assert(run('P.x === L.respawn.x')); assert.equal(run('L.retries'),1); assert.equal(run('L.bannerT'),200);
+  // an expired pulse in part 2 also goes back to the part 2 gate
+  reset(1); run("L.time=600; var gate=L.ents.find(e=>e.type==='stage'); P.x=gate.x; P.y=gate.y; updateEntities(); L.time=L.timeLimit*60; retryCheckpoint();");
+  assert.equal(run('L.stage'),1); assert.equal(run('L.time'),600); assert.equal(run('G.state'),'play');
+  // the pause menu offers "Restart part 2"
+  run("setState('paused'); G.menuIdx=2;"); assert.equal(run('menuItems()[2]'),'Restart part 2');
+  run('L.time=5000; menuSelect();'); assert.equal(run('L.stage'),1); assert.equal(run('L.time'),600);
+  // part 1 still restarts the whole map
+  reset(0); run("P.reps=1; loseReplicate('test'); pressed.ok=true; update();");
+  assert.equal(run('G.state'),'intro'); assert.equal(run('L.stage'),0);
+});
 check('TSB and SN exits accept the sample without collecting or unlocking anything', () => {
   for (const level of [0,2]) {
     reset(level); run('enterStage(1)'); assert(!run('goalStatus(L.def.goals[0]).done'));

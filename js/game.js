@@ -412,6 +412,7 @@ function enterStage(stage) {
   L.stocks++;
   L.bannerT = 200; G.iris = 45; G.shake = 0;
   captureCheckpoint();
+  L.stageStart = { checkpoint: L.checkpoint, time: L.time, samples: L.recording.length };
   snapCamera();
   AUDIO.play('check'); AUDIO.music(L.def.name);
   toast(`Stock saved. ${L.def.part2}`, 260);
@@ -1368,7 +1369,7 @@ function finishLevel() {
 
 // ---- pause menu ------------------------------------------------------------------
 function menuItems() {
-  const items = ['Resume', L.difficulty === 0 ? 'Retry checkpoint (free)' : 'Retry checkpoint (+3 s)', 'Restart level', `Sound effects: ${AUDIO.sfxOn ? 'on' : 'off'}`, `Music: ${AUDIO.musicOn ? 'on' : 'off'}`, 'Main menu'];
+  const items = ['Resume', L.difficulty === 0 ? 'Retry checkpoint (free)' : 'Retry checkpoint (+3 s)', L.stage > 0 ? `Restart part ${L.stage + 1}` : 'Restart level', `Sound effects: ${AUDIO.sfxOn ? 'on' : 'off'}`, `Music: ${AUDIO.musicOn ? 'on' : 'off'}`, 'Main menu'];
   return items;
 }
 function menuRects() { return menuItems().map((_, i) => ({ x: VIEW_W / 2 - 170, y: (L.difficulty < 100 ? 154 : 158) + i * (L.difficulty < 100 ? 40 : 46), w: 340, h: L.difficulty < 100 ? 36 : 40 })); }
@@ -1377,7 +1378,7 @@ function menuSelect() {
   switch (G.menuIdx) {
     case 0: setState('play'); break;
     case 1: retryCheckpoint(); break;
-    case 2: loadLevel(G.levelIdx); setState('intro'); break;
+    case 2: if (L.stage > 0) restartPart(); else { loadLevel(G.levelIdx); setState('intro'); } break;
     case 3: AUDIO.toggleSfx(); break;
     case 4: AUDIO.toggleMusic(); break;
     case 5: G.startLevel = G.levelIdx; setState('title'); break;
@@ -1443,7 +1444,11 @@ function update() {
     case 'gameOver':
       if (took('retry')) { retryCheckpoint(); break; }
       if (took('pause')) { G.startLevel = G.levelIdx; setState('title'); break; }
-      if (took('ok') || took('jump')) { G.failReason = ''; loadLevel(G.levelIdx); setState('intro'); }
+      if (took('ok') || took('jump')) {
+        G.failReason = '';
+        if (L.stage > 0) restartPart();   // failing in part 2 restarts part 2, not the map
+        else { loadLevel(G.levelIdx); setState('intro'); }
+      }
       break;
     case 'win':
       if (took('ok') || took('jump')) setState('title');
@@ -2951,7 +2956,7 @@ function draw() {
         lines: G.failReason === 'pulse'
           ? ['In the real experiment the pulse samples were', 'harvested after exactly 15 min in PASN.', 'Try again, a bit faster.']
           : ['With zero replicates there is nothing to compare:', 'no mean, no variance, no test.', 'Even n = 3 is small, so protect your replicates!'],
-        footer: 'R / tap here: retry stock (+3 s) · Enter: restart · Esc: menu', accent: '#b3261e',
+        footer: `R / tap here: retry stock (+3 s) · Enter: restart${L.stage > 0 ? ' part ' + (L.stage + 1) : ''} · Esc: menu`, accent: '#b3261e',
       });
       break;
     case 'win':
