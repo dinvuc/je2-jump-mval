@@ -39,7 +39,20 @@ Then play the three media of the experiment as levels, plus a bonus level:
    **This level is a game setting, not part of the course experiment.**
 
 Each level has at most one tunnel, with labelled channels ("tunnel",
-"back up", "secret"), and glowing arrows show the way at every turn.
+"back up", "secret"), and glowing arrows show the way at every turn. Inside a
+tunnel the view darkens around a soft light on your cell and the music is
+muffled.
+
+**Medal times:** every level has gold / silver / bronze target times (shown in
+the level intro). The HUD timer dot shows which medal you are still on track
+for; the results screen shows your medal and best time, and the title screen
+shows your best medal on each level button. Best times are kept in your
+browser only. (The targets are first estimates and may need tuning.)
+
+**Antibiotic waves (CF level):** every 55–80 s, after a 3 s warning, an inhaled
+antibiotic mist comes down the airway for 4 s. Take cover under a floor (within
+10 tiles above you) or lose a replicate. *P. aeruginosa* caught in the open
+die; the alginate-wrapped boss is unaffected.
 
 Each level has a goal checklist (bottom-left on screen). Required goals must be
 done before the MS (or the sputum sample) takes your sample; bonus goals give
@@ -115,6 +128,10 @@ get on-screen buttons.
 
 ## Music and sound
 
+The music adds a percussion layer when enemies are near and is muffled in
+tunnels; each level has its own victory jingle, and a chime plays when a goal
+is ticked off.
+
 The soundtrack is an original chiptune written for this game: an 8-bar theme
 over C–Am–F–G, with a different arrangement per medium (bright for TSB,
 faster for SNpulse, a darker minor version for SN). It and all sound effects
@@ -133,7 +150,9 @@ music falls under the same MIT license as the code.
   vitro, not CF samples. Its fact card is general background (see sources).
 - **Game metaphors, not biological claims:** the boss (a mucoid colony that
   walks, spits and slams), coughs that "add" bacteria, superoxide fired like
-  rockets, "double jump = kinase boost", the
+  rockets, the antibiotic mist as a hazard you hide from (in reality
+  antibiotics are a key CF treatment; here you play a bacterium), "double
+  jump = kinase boost", the
   slow recharge for `stp`, "3 Fe = one replicate", the AhpC shield, the TcyA
   magnet, HQNO slowing you down, LasA/LasB/OMVs/HCN/rhamnolipids as hazards,
   "lysed cells" that collapse, ribosome blocks, shooting PSMs (in reality
@@ -166,7 +185,7 @@ music falls under the same MIT license as the code.
   carotenoid of *S. aureus*; cystic fibrosis (CFTR, thick mucus, impaired
   mucociliary clearance, *S. aureus* common in children and *P. aeruginosa*
   more common with age; mucoid, alginate-producing *P. aeruginosa* in chronic
-  CF infection); pyocyanin redox cycling producing superoxide and hydrogen
+  CF infection; biofilms and alginate reducing antibiotic efficacy); pyocyanin redox cycling producing superoxide and hydrogen
   peroxide; trypsin cutting after K/R in bottom-up proteomics.
 
 ## Files

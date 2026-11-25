@@ -55,7 +55,7 @@ function clearPressed() { for (const k in pressed) pressed[k] = false; }
 // samples, no third-party music. The soundtrack below was composed for this game.
 // The audio context only starts after a key press or click (browser rule).
 const AUDIO = (() => {
-  let ac = null, sfxBus = null, musBus = null, noise = null;
+  let ac = null, sfxBus = null, musBus = null, musFilter = null, noise = null, intensity = 0, muffled = false;
   let sfxOn = true, musicOn = true;
   try {
     sfxOn = localStorage.getItem('je2jump_muted') !== '1';
@@ -67,7 +67,9 @@ const AUDIO = (() => {
   function init() {
     ac = new (window.AudioContext || window.webkitAudioContext)();
     sfxBus = ac.createGain(); sfxBus.gain.value = 1; sfxBus.connect(ac.destination);
-    musBus = ac.createGain(); musBus.gain.value = 0.55; musBus.connect(ac.destination);
+    musBus = ac.createGain(); musBus.gain.value = 0.55;
+    musFilter = ac.createBiquadFilter(); musFilter.type = 'lowpass'; musFilter.frequency.value = 20000;   // muffles the music in tunnels
+    musBus.connect(musFilter).connect(ac.destination);
     noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
     const d = noise.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -103,7 +105,14 @@ const AUDIO = (() => {
     crack: () => { fx(170, 55, 0.14, 'sawtooth', 0.035); hiss(0.12, 0.05, ac.currentTime, 1500, sfxBus); },
     signal: () => arp([392, 523, 659, 784, 1047], 0.05, 'sine', 0.05, 0.18),
     off: () => arp([660, 440], 0.08, 'sine', 0.04),
-    done: () => arp([523, 659, 784, 1047, 1319], 0.09, 'triangle', 0.06, 0.16),
+    done: k => arp([                                       // a different victory jingle per level
+      [523, 659, 784, 1047, 1319],                         // TSB: bright C major
+      [587, 740, 880, 1175, 880, 1175],                    // SNpulse: quick D major
+      [440, 523, 659, 880, 1047, 1319],                    // SN: from A minor up to C
+      [392, 494, 587, 784, 988, 1175, 1568],               // CF: a long fanfare
+    ][(k - 1) % 4], 0.09, 'triangle', 0.06, 0.18),
+    goal: () => arp([784, 988, 1319], 0.07, 'sine', 0.06, 0.2),
+    mist: () => { hiss(2.5, 0.05, ac.currentTime, 3000, sfxBus); hiss(2.5, 0.03, ac.currentTime + 0.4, 6000, sfxBus); },
     fail: () => arp([392, 330, 262, 196], 0.14, 'triangle', 0.06, 0.2),
     click: () => fx(660, 660, 0.05, 'square', 0.03),
     move: () => fx(440, 440, 0.03, 'square', 0.02),
@@ -162,6 +171,11 @@ const AUDIO = (() => {
     if (inBar === 0 || inBar === 8 || (song.drums > 1 && inBar === 10)) tone(150, 45, 0.14, 'sine', 0.22, t, musBus);   // kick
     if (inBar === 4 || inBar === 12) hiss(0.11, 0.07, t, 1200, musBus);                                                  // snare
     if (song.drums > 1 ? true : inBar % 2 === 0) hiss(0.03, inBar % 4 === 2 ? 0.035 : 0.018, t, 7000, musBus);          // hi-hat
+    if (intensity > 0.5) {                                   // danger layer: enemies nearby
+      if (inBar % 2 === 1) hiss(0.025, 0.03, t, 9000, musBus);
+      if (inBar === 6 || inBar === 14) tone(240, 110, 0.12, 'sine', 0.16, t, musBus);
+      if (inBar === 15) tone(330, 140, 0.1, 'sine', 0.12, t, musBus);
+    }
   }
   function schedule() {
     if (!ac || !song || !musicOn) return;
@@ -185,6 +199,12 @@ const AUDIO = (() => {
       song = s; step = 0; if (ac) nextT = ac.currentTime + 0.08;
     },
     duck(on) { if (musBus) musBus.gain.setTargetAtTime(on ? 0.15 : 0.55, ac.currentTime, 0.1); },
+    muffle(on) {
+      if (on === muffled) return;
+      muffled = on;
+      if (musFilter) musFilter.frequency.setTargetAtTime(on ? 650 : 20000, ac.currentTime, 0.25);
+    },
+    intensity(v) { intensity = v; },
     toggleSfx() { sfxOn = !sfxOn; save(); },
     toggleMusic() { musicOn = !musicOn; save(); if (ac) nextT = ac.currentTime + 0.05; },
     get sfxOn() { return sfxOn; },
@@ -226,6 +246,15 @@ const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h 
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
 function loadBest() { try { return Number(localStorage.getItem('je2jump_best')) || 0; } catch { return 0; } }
 function saveBest(v) { try { localStorage.setItem('je2jump_best', String(v)); } catch { /* private mode */ } }
+// Best times per level (seconds), kept in this browser only.
+function loadTimes() { try { return JSON.parse(localStorage.getItem('je2jump_times')) || {}; } catch { return {}; } }
+function saveTimes(t) { try { localStorage.setItem('je2jump_times', JSON.stringify(t)); } catch { /* private mode */ } }
+const MEDALS = [['gold', '#f3c22f'], ['silver', '#c9d3dc'], ['bronze', '#d08a4c']];
+function medalFor(def, secs) {
+  const i = def.medals.findIndex(m => secs <= m);
+  return i < 0 ? null : MEDALS[i];
+}
+const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 // Seeded random numbers, so the level art looks the same every time.
 function mulberry32(a) {
@@ -253,6 +282,8 @@ function setState(s) {
   G.state = s; clearPressed();
   AUDIO.music(s === 'title' ? 'title' : !L ? 'title' : L.bossActive && !L.bossDown ? 'boss' : L.def.name);
   AUDIO.duck(s === 'paused');
+  if (s !== 'play' && s !== 'paused') { AUDIO.muffle(false); AUDIO.intensity(0); }
+  if (s === 'title') G.iris = 45;
 }
 
 // Start at the level picked on the title screen; later levels follow in order.
@@ -271,7 +302,8 @@ function loadLevel(i) {
     time: 0, cam: 0, camY: 0, cystine: 0, ironBank: 0, ironTotal: 0, points: 0, goalMsgT: 0,
     fx: [], pops: [], movers: [], blocks: [], shots: [], lysis: new Map(), chan: {}, solids: [], plats: [],
     combo: 0, comboT: 0, kills: 0, peptides: 0, gateOpened: false, spawnQ: [],
-    bossActive: false, bossDown: false,
+    bossActive: false, bossDown: false, bg: b.bg, caveK: 0, jiggle: new Map(), goalSeen: {},
+    abNext: 60 * (35 + Math.random() * 15), abWarn: 0, abOn: 0, abExpose: 0, covered: true,
     coughNext: 60 * (14 + Math.random() * 10), coughing: 0, coughWarn: 0, coughFlash: 0,
     art: buildLevelArt(b, def.theme, i),
   };
@@ -291,7 +323,8 @@ function loadLevel(i) {
     face: 1, inv: 0, slow: 0, shield: 0, magnet: 0, phos: 0, reps: 3, squash: 0, ride: null, roll: 0,
     ammo: 0, gold: 0, shootCool: 0, sticky: 0, belt: 0, sprung: false,
   };
-  G.toast = ''; G.toastT = 0; G.failReason = ''; G.shake = 0;
+  G.toast = ''; G.toastT = 0; G.failReason = ''; G.shake = 0; G.iris = 45; G.hitStop = 0;
+  for (const g of def.goals) L.goalSeen[g.id] = g.id === 'reps' || g.id === 'time';
   L.solids = dynSolids();
   snapCamera();
 }
@@ -516,13 +549,16 @@ function killEnemy(e) {
   if (e.type !== 'rosb') L.kills++;   // a radical is not a P. aeruginosa product or cell
   else once('rosstomp', 'Superoxide neutralised. Antioxidant enzymes do this inside real cells.');
   gain(200, b.x + b.w / 2, b.y, '#ff8a96');
+  flash(b.x + b.w / 2, b.y + b.h / 2, 20);
   burst(b.x + b.w / 2, b.y + b.h / 2, ENEMY_COL[e.type] || '#b8404c', 16, 3.2);
-  G.shake = Math.max(G.shake, 5); AUDIO.play('stomp');
+  G.shake = Math.max(G.shake, 5); G.hitStop = 3; AUDIO.play('stomp');
 }
+// A quick white flash (impact), drawn as a fading particle.
+function flash(x, y, r) { L.fx.push({ x, y, vx: 0, vy: 0, grav: 0, life: 9, max: 9, color: 'rgba(255,255,255,0.9)', r }); }
 function enemyContact(e, msg, kind = 'enemy') {
   const b = enemyBox(e);
   if (!overlap(P, b)) return;
-  if (P.vy > 0 && P.y + P.h - P.vy <= b.y + 8) { killEnemy(e); P.vy = JUMP_V * 0.7; P.sprung = false; }
+  if (P.vy > 0 && P.y + P.h - P.vy <= b.y + 8) { killEnemy(e); P.vy = JUMP_V * 0.7; P.sprung = false; P.squash = 0.32; }
   else hurt(kind, msg);
 }
 
@@ -531,7 +567,8 @@ function bossBox(e) { return { x: e.bx - 46, y: e.by + e.jy - 70, w: 92, h: 70 }
 function damageBoss(e, n) {
   if (e.hitT > 0 || e.state === 'dead') return;
   e.hp -= n; e.hitT = 18;
-  G.shake = Math.max(G.shake, 6);
+  G.shake = Math.max(G.shake, 6); G.hitStop = 4;
+  flash(e.bx, e.by + e.jy - 38, 46);
   burst(e.bx, e.by - 40, '#9be07a', 14, 3);
   AUDIO.play('bossHit');
   if (e.hp <= 0) {
@@ -593,10 +630,49 @@ function updateBoss(e, pcx) {
   const b = bossBox(e);
   if (overlap(P, b)) {
     if (P.vy > 0 && P.y + P.h - P.vy <= b.y + 14) {
-      P.vy = JUMP_V * 0.85; P.sprung = false;
+      P.vy = JUMP_V * 0.85; P.sprung = false; P.squash = 0.32;
       if (e.open > 0.6) damageBoss(e, 2);
       else { AUDIO.play('boing'); once('shell', 'The alginate shell is too tough to stomp. Wait until it opens, or shoot it!'); }
     } else hurt('enemy', 'The mucoid colony crashed into you.');
+  }
+}
+
+// ---- inhaled antibiotic waves (CF level): take cover under a floor ----------------
+// A game metaphor: antibiotics are a key CF treatment; here you play a bacterium,
+// so the mist is a hazard. Cells in the open die; the alginate-wrapped colony does not.
+const COVER_ROWS = 10;   // a floor at most this many rows above you shelters you
+function coveredAt(x, y) {
+  const tx = Math.floor(x / TILE), top = Math.floor(y / TILE) - 1;
+  for (let ty = top; ty >= Math.max(0, top - COVER_ROWS); ty--) if (isSolid(tileAt(tx, ty))) return true;
+  return false;
+}
+const isCovered = () => coveredAt(P.x + P.w / 2, P.y);
+function updateAntibiotic() {
+  if (!L.def.theme.cough) return;
+  L.covered = isCovered();
+  if (L.abOn > 0) {
+    L.abOn--;
+    if (!L.covered && P.inv === 0 && L.abExpose >= 0 && ++L.abExpose > 40) {
+      L.abExpose = -1;   // one hit per wave
+      hurt('ab', 'The inhaled antibiotic reached you. Take cover under a floor!');
+    }
+    if (L.time % 20 === 0) for (const e of L.ents) {   // cells caught in the open die
+      if (!e.alive || (e.type !== 'pa' && e.type !== 'twitch') || Math.random() > 0.25) continue;
+      const ex = e.type === 'pa' ? e.cx : e.x + 16, ey = e.type === 'pa' ? e.cy : e.y + 16;
+      if (!coveredAt(ex, ey)) { e.alive = false; burst(ex, ey, '#bff5ee', 12, 2.4); }
+    }
+    if (L.bossActive && !L.bossDown && L.abOn === 200) once('abboss', 'Its alginate shell shields the colony from the antibiotic: biofilms are hard to treat.');
+    return;
+  }
+  if (L.abWarn > 0) {
+    if (--L.abWarn === 0) { L.abOn = 240; L.abExpose = 0; AUDIO.play('mist'); }
+    return;
+  }
+  if (--L.abNext <= 0) {
+    if (L.coughing > 0 || L.coughWarn > 0) { L.abNext = 180; return; }   // never together with a cough
+    L.abNext = 60 * (55 + Math.random() * 25);
+    L.abWarn = 180; AUDIO.play('warn');
+    toast('Inhaled antibiotic coming in 3 s: take cover under a floor!', 170);
   }
 }
 
@@ -613,6 +689,7 @@ function updateCough() {
     return;
   }
   if (L.coughWarn > 0) L.coughWarn--;
+  if (L.abWarn > 0 || L.abOn > 0) return;   // no cough during an antibiotic wave
   if (--L.coughNext === 75) { L.coughWarn = 75; AUDIO.play('warn'); }
   if (L.coughNext <= 0) {
     L.coughNext = 60 * (24 + Math.random() * 22);   // next cough in 24-46 s
@@ -819,7 +896,7 @@ function hurt(kind, msg) {
     toast('AhpC absorbed the ROS. Shield used up.');
     return;
   }
-  P.inv = 90; P.vy = -6; P.vx = -P.face * 3;
+  P.inv = 90; P.vy = -6; P.vx = -P.face * 3; P.dizzy = 80;
   burst(P.x + P.w / 2, P.y + P.h / 2, '#e0465a', 12, 3);
   G.shake = 10; AUDIO.play('hurt');
   loseReplicate(msg);
@@ -847,6 +924,7 @@ function updatePlay() {
   updateBlocks();
   updateLysis();
   updateCough();
+  updateAntibiotic();
   L.solids = dynSolids();
   L.plats = L.movers.concat(L.ents.filter(e => e.type === 'shuttle'));
   // Ride along with the platform you stand on.
@@ -907,6 +985,12 @@ function updatePlay() {
   if (P.onGround && !wasGround && fallV > 4) {
     P.squash = Math.min(0.3, fallV / 32);
     burst(P.x + P.w / 2, P.y + P.h, rgba(L.def.theme.eps, 0.9), 6, 1.6, -0.02, 26);
+    // mucus jiggles where you land
+    const ty = Math.floor((P.y + P.h + 1) / TILE), tx = Math.floor((P.x + P.w / 2) / TILE);
+    for (let x = tx - 2; x <= tx + 2; x++) if (tileAt(x, ty) === '~') L.jiggle.set(ty * L.cols + x, Math.min(6, fallV * 0.6) * (1 - Math.abs(x - tx) * 0.25));
+  }
+  if (wasGround && !P.onGround && fallV >= 0 && !P.sprung) {   // slid off a ledge: a puff of dust
+    burst(P.x + P.w / 2 - P.face * 10, P.y + P.h, rgba(L.def.theme.eps, 0.85), 5, 1.2, 0.02, 22);
   }
   P.squash *= 0.82;
   P.roll += P.vx / 14;                                // the cell rolls as it moves
@@ -923,7 +1007,7 @@ function updatePlay() {
     else if (c === '>') P.belt = 1.5;
   }
 
-  for (const t of ['inv', 'slow', 'shield', 'magnet', 'phos', 'gold', 'repFlash']) if (P[t] > 0) P[t]--;
+  for (const t of ['inv', 'slow', 'shield', 'magnet', 'phos', 'gold', 'repFlash', 'dizzy']) if (P[t] > 0) P[t]--;
 
   if (inFoam()) hurt('foam', 'Rhamnolipid foam damaged your membrane.');
   if (G.state !== 'play') return;
@@ -940,6 +1024,23 @@ function updatePlay() {
   updateFx();
   followCamera();
   pressed.down = false; pressed.up = false;   // ↓ only counts while standing on a channel
+  // tunnels: darker around a light on your cell, muffled music
+  const inCave = L.bg && (L.bg[Math.floor((P.y + P.h / 2) / TILE)] || [])[Math.floor((P.x + P.w / 2) / TILE)] === 'c';
+  L.caveK += ((inCave ? 1 : 0) - L.caveK) * 0.08;
+  AUDIO.muffle(inCave);
+  // music gets busier when enemies are close
+  if (L.time % 15 === 0) {
+    const near = L.ents.some(e => e.alive && (ENEMIES.has(e.type) || e.type === 'boss') && dist(e.cx ?? e.bx ?? e.x + 16, e.cy ?? (e.by ? e.by - 30 : e.y + 16), P.x + P.w / 2, P.y + P.h / 2) < 320);
+    AUDIO.intensity(near ? 1 : 0);
+    // a chime when a goal is ticked off
+    for (const g of L.def.goals) {
+      if (L.goalSeen[g.id] || !goalStatus(g).done) continue;
+      L.goalSeen[g.id] = true;
+      AUDIO.play('goal'); toast(`✓ Goal done: ${g.label}`, 150);
+      burst(P.x + P.w / 2, P.y - 10, '#9be89f', 16, 2.6, -0.02, 34);
+    }
+  }
+  for (const [k, a] of L.jiggle) { if (a < 0.2) L.jiggle.delete(k); else L.jiggle.set(k, a * 0.92); }
   if (G.toastT > 0) G.toastT--;
   if (L.goalMsgT > 0) L.goalMsgT--;
   if (L.comboT > 0) L.comboT--;
@@ -1243,9 +1344,14 @@ function finishLevel() {
   const stars = [true, ...bonus.map(g => goalStatus(g).done)];
   const starLabels = [L.def.goalKind === 'sputum' ? 'sample delivered' : 'sample measured', ...bonus.map(g => g.short)];
   G.score += total;
-  G.results[G.levelIdx] = { name: L.def.name, points: L.points, timeBonus, repBonus, total, cystine: L.cystine, totalCys: L.totalCys, iron: L.ironTotal, reps: P.reps, secs: L.time / 60, stars, starLabels, kills: L.kills, peptides: L.peptides, totalPep: L.totalPep };
+  // medal time, and the best time for this level in this browser
+  const secs = L.time / 60, medal = medalFor(L.def, secs), times = loadTimes();
+  const prevBest = times[L.def.name], newBest = prevBest === undefined || secs < prevBest;
+  if (newBest) { times[L.def.name] = secs; saveTimes(times); }
+  G.times = times;
+  G.results[G.levelIdx] = { name: L.def.name, points: L.points, timeBonus, repBonus, total, cystine: L.cystine, totalCys: L.totalCys, iron: L.ironTotal, reps: P.reps, secs, stars, starLabels, kills: L.kills, peptides: L.peptides, totalPep: L.totalPep, medal, best: Math.min(secs, prevBest ?? secs), newBest };
   setState('levelDone');
-  AUDIO.play('done');
+  AUDIO.play('done', G.levelIdx + 1);
 }
 
 // ---- pause menu ------------------------------------------------------------------
@@ -1266,6 +1372,7 @@ function menuSelect() {
 
 // ---- the state machine -----------------------------------------------------------
 function update() {
+  if (G.iris > 0) G.iris--;
   if (took('mute')) AUDIO.toggleSfx();
   if (took('music')) AUDIO.toggleMusic();
   switch (G.state) {
@@ -1286,6 +1393,7 @@ function update() {
       break;
     case 'play':
       if (took('pause')) { G.menuIdx = 0; setState('paused'); AUDIO.play('click'); break; }
+      if (G.hitStop > 0) { G.hitStop--; break; }   // a tiny freeze on big hits
       updatePlay();
       break;
     case 'paused': {
@@ -1738,6 +1846,59 @@ function drawDarkness(cx, cy) {
   ctx.fillStyle = g; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 }
 
+// Weather per medium: golden nutrient flakes (TSB), motes (SNpulse), pyocyanin mist
+// (SN), mucus flecks and air streaks during coughs (CF); plus the antibiotic mist.
+function drawWeather(cx, cy) {
+  const w = L.def.theme.weather, t = L.time, W = VIEW_W + 60, H = VIEW_H + 60;
+  if (!L.weather) L.weather = Array.from({ length: 46 }, () => ({ x: Math.random() * W, y: Math.random() * H, v: 0.3 + Math.random() * 0.6, r: 1 + Math.random() * 2.2, ph: Math.random() * TAU }));
+  const at = p => [((p.x - cx * 0.9) % W + W) % W - 30, ((p.y - cy * 0.9) % H + H) % H - 30];
+  if (w === 'snow' || w === 'motes') {
+    const col = w === 'snow' ? '#ffe7a0' : '#d9f2b0';
+    for (const p of L.weather) {
+      p.y += p.v * (w === 'snow' ? 1 : -0.5); p.x += Math.sin(t * 0.02 + p.ph) * 0.3;
+      const [x, y] = at(p);
+      glow(x, y, p.r * 3, col, 0.35); circle(x, y, p.r, rgba(col, 0.8));
+    }
+  } else if (w === 'mist') {
+    for (let k = 0; k < 4; k++) {
+      const span = VIEW_W + 800, x = ((t * (0.4 + k * 0.15) + k * 400 - cx * 0.6) % span + span) % span - 400;
+      const y = 110 + k * 120 + Math.sin(t * 0.01 + k) * 30;
+      ctx.save(); ctx.translate(x, y); ctx.scale(3, 1);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 110);
+      g.addColorStop(0, 'rgba(70,130,230,0.14)'); g.addColorStop(1, 'rgba(70,130,230,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 110, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+  } else if (w === 'cf') {
+    for (let i = 0; i < 20; i++) { const p = L.weather[i]; p.y -= p.v * 0.4; const [x, y] = at(p); circle(x, y, p.r, 'rgba(240,235,160,0.45)'); }
+    if (L.coughing > 0) {
+      const k = Math.sin((1 - L.coughing / 100) * Math.PI);
+      ctx.strokeStyle = `rgba(255,255,255,${0.55 * k})`; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      for (const p of L.weather) {
+        p.y -= 14 * k;
+        const [x, y] = at(p);
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.sin(p.ph) * 4, y + 30 + p.r * 10); ctx.stroke();
+      }
+    }
+  }
+  if (L.abOn > 0 || L.abWarn > 0) {   // the antibiotic mist comes down the airway
+    const k = L.abOn > 0 ? Math.min(1, (240 - L.abOn) / 30, L.abOn / 30) : 0.25 * (1 - L.abWarn / 180);
+    ctx.fillStyle = `rgba(120,220,210,${0.22 * k})`; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.fillStyle = `rgba(225,255,250,${0.8 * k})`;
+    for (const p of L.weather) ctx.fillRect((p.x * 1.7) % VIEW_W, ((p.y * 1.3 + t * (3 + p.v * 3)) % (VIEW_H + 20)) - 10, 2, 7);
+  }
+}
+
+// Inside a tunnel the world goes dark around a soft light on your cell.
+function drawCaveLight(cx, cy) {
+  if (L.caveK < 0.02) return;
+  const px = P.x + P.w / 2 - cx, py = P.y + P.h / 2 - cy;
+  const g = ctx.createRadialGradient(px, py, 60, px, py, 360);
+  g.addColorStop(0, 'rgba(5,10,14,0)'); g.addColorStop(1, `rgba(5,10,14,${0.72 * L.caveK})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; glow(px, py, 90, '#ffe9a8', 0.16 * L.caveK); ctx.restore();
+}
+
 function visibleTiles(cx, cy, fn) {
   const c0 = Math.max(0, Math.floor(cx / TILE)), c1 = Math.min(L.cols - 1, Math.floor((cx + VIEW_W) / TILE));
   const r0 = Math.max(0, Math.floor(cy / TILE)), r1 = Math.min(L.rows - 1, Math.floor((cy + VIEW_H) / TILE));
@@ -1749,6 +1910,13 @@ function drawSpecialTiles(cx, cy) {
   const t = L.time, mucusStyle = L.def.theme.debris === 'mucus';
   visibleTiles(cx, cy, (c, tx, ty) => {
     const X = tx * TILE, Y = ty * TILE;
+    if (c === '#') {   // the biofilm surface shimmers: its cells "breathe"
+      if (ty > 0 && !isSolid(L.grid[ty - 1][tx])) {
+        const a = 0.1 + 0.12 * Math.sin(t * 0.05 + tx * 0.7 + ty * 1.3);
+        if (a > 0.12) circle(X + 5 + ((tx * 7) % 3) * 11, Y + 3, 3.2, `rgba(255,255,255,${a})`);
+      }
+      return;
+    }
     if (c === 'R' || c === 'U') { // ribosome: large + small subunit on an mRNA
       const used = c === 'U';
       if (!used) glow(X + 16, Y + 16, 26 + Math.sin(t * 0.1) * 3, '#ffd66a', 0.35);
@@ -1779,7 +1947,8 @@ function drawSpecialTiles(cx, cy) {
       g.addColorStop(0, '#eef0a0'); g.addColorStop(1, '#a8b44a');
       ctx.fillStyle = g; ctx.fillRect(X, Y + 3, TILE, TILE - 3);
       ctx.beginPath(); ctx.moveTo(X, Y + 4);
-      for (let k = 0; k <= TILE; k += 4) ctx.lineTo(X + k, Y + 2 + Math.sin(k * 0.4 + tx * 2 + t * 0.05) * 1.8);
+      const jig = L.jiggle.get(ty * L.cols + tx) || 0;   // wobbles more right after you land on it
+      for (let k = 0; k <= TILE; k += 4) ctx.lineTo(X + k, Y + 2 + Math.sin(k * 0.4 + tx * 2 + t * 0.05) * 1.8 + Math.sin(t * 0.6 + k * 0.3) * jig);
       ctx.lineTo(X + TILE, Y + 8); ctx.lineTo(X, Y + 8); ctx.closePath(); ctx.fill();
       circle(X + 8 + (tx % 3) * 6, Y + 12 + Math.sin(t * 0.04 + tx) * 2, 2.2, 'rgba(255,255,225,0.7)');
       ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(X + 2, Y + 3); ctx.lineTo(X + 14, Y + 2); ctx.stroke();
@@ -1795,7 +1964,7 @@ function drawSpecialTiles(cx, cy) {
       ctx.strokeStyle = 'rgba(122,52,67,0.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(X + 16, Y + 6); ctx.lineTo(X + 16, Y + TILE); ctx.stroke();
       ctx.strokeStyle = '#fbe3e7'; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
       for (let k = 0; k < 6; k++) {
-        const bx = X + 3 + k * 5.4, a = dir * 0.5 + Math.sin(t * 0.22 - (tx * 6 + k) * 0.55 * dir) * 0.55;
+        const bx = X + 3 + k * 5.4, a = dir * 0.45 + Math.sin(t * 0.25 - (tx * 6 + k) * 0.35 * dir) * 0.8;   // a travelling wave
         ctx.beginPath(); ctx.moveTo(bx, Y + 5); ctx.quadraticCurveTo(bx + Math.sin(a) * 4, Y, bx + Math.sin(a) * 8, Y - 3 - Math.cos(a) * 3); ctx.stroke();
       }
       ctx.globalAlpha = 0.35; text(dir > 0 ? '›' : '‹', X + 16, Y + 24, { size: 14, color: '#7a3443', align: 'center', weight: '900' }); ctx.globalAlpha = 1;
@@ -1848,7 +2017,7 @@ function nearestSign() {
   let best = null, bd = Infinity;
   for (const s of L.signs) {
     const dx = Math.abs(s.tx * TILE + 16 - (P.x + P.w / 2)), dy = Math.abs(s.ty * TILE + 16 - (P.y + P.h / 2));
-    if (dx < TILE * 5 && dy < TILE * 4 && dx + dy < bd) { bd = dx + dy; best = s; }
+    if (dx < TILE * 1.5 && dy < TILE * 1.5 && dx + dy < bd) { bd = dx + dy; best = s; }   // only when really close
   }
   return best;
 }
@@ -1857,11 +2026,13 @@ function drawSigns(cx, cy) {
   for (const s of L.signs) {
     const x = s.tx * TILE + 16, y = s.ty * TILE + 12 + Math.sin(L.time * 0.05 + s.tx) * 3;
     if (x < cx - 40 || x > cx + VIEW_W + 40 || y < cy - 40 || y > cy + VIEW_H + 40) continue;
-    if (s === near) glow(x, y, 30, '#ffffff', 0.5);
-    circle(x, y, 13, 'rgba(255,255,255,0.55)');
-    ctx.strokeStyle = 'rgba(90,120,150,0.9)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, 13, 0, TAU); ctx.stroke();
-    ctx.strokeStyle = 'rgba(90,120,150,0.5)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 9.5, 0, TAU); ctx.stroke();
+    if (s === near) glow(x, y, 30, '#ffffff', 0.45);
+    ctx.globalAlpha = s === near ? 0.9 : 0.6;
+    circle(x, y, 13, 'rgba(255,255,255,0.3)');
+    ctx.strokeStyle = 'rgba(90,120,150,0.75)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, 13, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = 'rgba(90,120,150,0.4)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 9.5, 0, TAU); ctx.stroke();
     text('i', x, y + 5, { size: 15, color: '#2c4f70', align: 'center', weight: '900', font: 'Georgia, serif' });
+    ctx.globalAlpha = 1;
   }
 }
 function drawSignText(cx, cy) {
@@ -1873,8 +2044,10 @@ function drawSignText(cx, cy) {
   const bx = clamp(x - w / 2, 8, VIEW_W - w - 8);
   let by = y - 28 - h;
   if (by < 58) by = y + 26;
-  roundRect(bx, by, w, h, 10, 'rgba(255,255,255,0.72)', 'rgba(90,120,150,0.7)', 1.5);
-  lines.forEach((ln, i) => text(ln, bx + 12, by + 23 + i * 18, { size: 14, color: '#1a2833' }));
+  roundRect(bx, by, w, h, 10, 'rgba(255,255,255,0.48)', 'rgba(90,120,150,0.45)', 1.5);
+  ctx.save(); ctx.shadowColor = 'rgba(255,255,255,0.9)'; ctx.shadowBlur = 3;   // keeps the text readable on the lighter box
+  lines.forEach((ln, i) => text(ln, bx + 12, by + 23 + i * 18, { size: 14, color: '#13212b' }));
+  ctx.restore();
 }
 
 function drawEntities(cx, cy) {
@@ -2370,6 +2543,17 @@ function drawPlayer() {
     text('P', cx + 13, cy - 11, { size: 10, color: '#fff', align: 'center', weight: '800' });
   }
   if (P.slow > 0) text('z', cx + 15, cy - 12 - (L.time % 30) / 3, { size: 13, color: '#355a1a', weight: '800' });
+  if (P.dizzy > 0) {   // dizzy after a hit: little stars circling the head
+    ctx.globalAlpha = Math.min(1, P.dizzy / 20);
+    for (let k = 0; k < 3; k++) {
+      const a = L.time * 0.18 + k * TAU / 3, sx = cx + Math.cos(a) * 15, sy = cy - 19 + Math.sin(a) * 4;
+      ctx.save(); ctx.translate(sx, sy); ctx.rotate(L.time * 0.2);
+      ctx.fillStyle = '#fff3a0'; ctx.beginPath();
+      for (let i = 0; i < 8; i++) { const rr = i % 2 ? 1.6 : 4; ctx.lineTo(Math.cos(i * Math.PI / 4) * rr, Math.sin(i * Math.PI / 4) * rr); }
+      ctx.closePath(); ctx.fill(); ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
 }
 
 function drawHUD() {
@@ -2412,6 +2596,21 @@ function drawHUD() {
     ctx.strokeStyle = urgent ? '#fff' : '#7fc4ff'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(VIEW_W - 134, 28, 8, -Math.PI / 2, -Math.PI / 2 + TAU * left / PULSE_S); ctx.stroke();
     text(`pulse ${mm}:${String(ss).padStart(2, '0')}`, VIEW_W - 30, 34, { size: 15, color: '#fff', align: 'right', weight: '800' });
+  } else {
+    // elapsed time, coloured by the medal you are still on track for
+    const secs = L.time / 60, m = medalFor(L.def, secs);
+    roundRect(VIEW_W - 132, 14, 112, 28, 14, 'rgba(255,255,255,0.12)');
+    circle(VIEW_W - 116, 28, 7, m ? m[1] : 'rgba(255,255,255,0.25)');
+    text(fmtTime(secs), VIEW_W - 30, 34, { size: 15, color: '#fff', align: 'right', weight: '800' });
+  }
+  // inhaled antibiotic warning / wave (CF)
+  if (L.abWarn > 0 || L.abOn > 0) {
+    const on = L.abOn > 0, blink = Math.floor(L.time / 8) % 2 === 0;
+    if (on || blink) {
+      roundRect(VIEW_W / 2 - 170, VIEW_H - 78, 340, 28, 14, on ? (L.covered ? 'rgba(27,127,59,0.85)' : 'rgba(179,38,30,0.9)') : 'rgba(30,110,120,0.85)');
+      text(on ? (L.covered ? 'antibiotic mist: you are covered ✓' : 'antibiotic mist: get under a floor!') : `antibiotic in ${Math.ceil(L.abWarn / 60)} s: take cover!`,
+        VIEW_W / 2, VIEW_H - 59, { size: 14, color: '#fff', align: 'center', weight: '800' });
+    }
   }
   // boss health
   const boss = L.bossActive && L.ents.find(e => e.type === 'boss' && e.alive && e.state !== 'dead');
@@ -2559,10 +2758,13 @@ function drawTitle() {
   }
   // level picker: the game starts at the chosen level
   text('Level (↑ ↓):', 170, 419, { size: 14, color: '#2b2b2b', align: 'right', weight: '700' });
+  const bestTimes = G.times || (G.times = loadTimes());
   for (const c of levelChips()) {
     const d = LEVELS[c.i], sel = G.startLevel === c.i;
     roundRect(c.x, c.y, c.w, c.h, 18, sel ? d.theme.accent : 'rgba(255,255,255,0.6)', sel ? null : 'rgba(0,0,0,0.15)', 1.5);
     text(c.i < 3 ? `${c.i + 1}. ${d.name}` : `★ ${d.name} (bonus)`, c.x + c.w / 2, c.y + 24, { size: 14, color: sel ? '#fff' : '#2b2b2b', align: 'center', weight: '800' });
+    const best = bestTimes[d.name], m = best !== undefined && medalFor(d, best);   // best medal so far
+    if (m) { circle(c.x + c.w - 14, c.y + 18, 7, m[1]); ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(c.x + c.w - 14, c.y + 18, 7, 0, TAU); ctx.stroke(); }
   }
   ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 4);
   text(`Press Enter / Space to start${G.best ? '   ·   best score ' + G.best : ''}`, VIEW_W / 2, 466, { size: 17, color: '#10202b', align: 'center', weight: '800' });
@@ -2590,22 +2792,38 @@ function drawWorld() {
   drawPlayer();
   drawFx();
   ctx.restore();
+  drawWeather(cx, cy);
   drawForeground(cx, cy);
   drawDarkness(cx, cy);
+  drawCaveLight(cx, cy);
   drawVignette();
   drawSignText(cx, cy);
   drawGoalList();
   drawHUD();
 }
 
+// Microscope-style iris: the view opens from a small focused circle.
+function drawIris() {
+  if (!(G.iris > 0)) return;
+  const k = G.iris / 45, r = Math.pow(1 - k, 1.6) * 600;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, VIEW_W, VIEW_H); ctx.arc(VIEW_W / 2, VIEW_H / 2, Math.max(1, r), 0, TAU, true);
+  ctx.fillStyle = '#0b1218'; ctx.fill('evenodd');
+  ctx.strokeStyle = `rgba(255,255,255,${0.35 * k})`; ctx.lineWidth = 10;
+  ctx.beginPath(); ctx.arc(VIEW_W / 2, VIEW_H / 2, r + 6, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = `rgba(160,200,255,${0.25 * k})`; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(VIEW_W / 2, VIEW_H / 2, r + 18, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+
 function draw() {
   ctx.clearRect(0, 0, VIEW_W, VIEW_H);
-  if (G.state === 'title') { drawTitle(); return; }
+  if (G.state === 'title') { drawTitle(); drawIris(); return; }
   drawWorld();
   const S = STRAINS[G.strain];
   switch (G.state) {
     case 'intro':
-      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), ['', `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
+      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), [`Medal times: gold ≤ ${fmtTime(L.def.medals[0])} · silver ≤ ${fmtTime(L.def.medals[1])} · bronze ≤ ${fmtTime(L.def.medals[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
       break;
     case 'paused':
       drawPauseMenu();
@@ -2613,8 +2831,14 @@ function draw() {
     case 'levelDone': {
       const r = G.results[G.levelIdx];
       const stats = `S–S ${r.cystine}/${r.totalCys} · Fe ${r.iron} · replicates ${r.reps}/3 · ${r.secs.toFixed(0)} s   →   +${r.total} points`;
-      panel({ title: `${L.def.name}: sample ${L.def.goalKind === 'sputum' ? 'delivered' : 'measured'}!`, sub: stats, lines: LEVEL_FACTS[G.levelIdx], footer: 'Press Enter to continue', accent: '#1b7f3b', bodyY: 316 });
-      drawStars(r.stars, r.starLabels, 206);
+      panel({ title: `${L.def.name}: sample ${L.def.goalKind === 'sputum' ? 'delivered' : 'measured'}!`, sub: stats, lines: LEVEL_FACTS[G.levelIdx], footer: 'Press Enter to continue', accent: '#1b7f3b', bodyY: 330 });
+      drawStars(r.stars, r.starLabels, 200);
+      // medal time
+      const mx = VIEW_W / 2 - 150;
+      circle(mx, 279, 11, r.medal ? r.medal[1] : '#d9d4c7');
+      if (r.medal) { ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(mx, 279, 11, 0, TAU); ctx.stroke(); }
+      text(`${r.medal ? r.medal[0] + ' medal' : 'no medal'} · time ${fmtTime(r.secs)} · best ${fmtTime(r.best)}${r.newBest ? ' (new best!)' : ''}`, mx + 20, 284, { size: 15, color: '#3d3523', weight: '700' });
+      text(`gold ≤ ${fmtTime(L.def.medals[0])} · silver ≤ ${fmtTime(L.def.medals[1])} · bronze ≤ ${fmtTime(L.def.medals[2])}`, VIEW_W / 2, 304, { size: 12, color: '#8a8270', align: 'center', weight: '600' });
       break;
     }
     case 'gameOver':
@@ -2630,11 +2854,12 @@ function draw() {
     case 'win':
       panel({
         title: 'All samples measured!', sub: `Strain ${S.label} · total score ${G.score}${G.newBest ? '  (new best!)' : ''}`,
-        lines: G.results.filter(Boolean).map(r => `${r.name}: ${r.total} points  ${'★'.repeat(r.stars.filter(Boolean).length)}${'☆'.repeat(r.stars.length - r.stars.filter(Boolean).length)}  (peptides ${r.peptides}/${r.totalPep}, ${r.reps}/3 replicates)`).concat([''], strainFact(G.strain)),
+        lines: G.results.filter(Boolean).map(r => `${r.name}: ${r.total} points  ${'★'.repeat(r.stars.filter(Boolean).length)}${'☆'.repeat(r.stars.length - r.stars.filter(Boolean).length)}  ${fmtTime(r.secs)}${r.medal ? ' ' + r.medal[0] : ''}  (peptides ${r.peptides}/${r.totalPep})`).concat([''], strainFact(G.strain)),
         footer: 'Press Enter to play another strain', accent: '#7a5a00',
       });
       break;
   }
+  drawIris();
 }
 
 // ---- main loop: fixed-step update, draw every animation frame -----------------------

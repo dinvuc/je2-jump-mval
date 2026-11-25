@@ -324,10 +324,11 @@ function buildCF() {
 // Theme colours: sky = medium, far = background clusters, matrix/cells = ground,
 // eps = gel surface, plat = strands, mol = drifting molecules, pyo = number of
 // blue pyocyanin specks in the background, dark = how murky the edges of the view get,
-// bg = background style, cough = the patient coughs now and then.
+// bg = background style, cough = the patient coughs (and gets inhaled antibiotics),
+// weather = particles in front of the scene. medals = gold / silver / bronze time in seconds.
 const LEVELS = [
   {
-    name: 'TSB', subtitle: 'Control medium', build: buildTSB, timeLimit: 0,
+    name: 'TSB', subtitle: 'Control medium', build: buildTSB, timeLimit: 0, medals: [75, 115, 170],
     goals: [
       { id: 'gate', label: 'Open the quorum-sensing gate', req: true },
       { id: 'pep', label: 'Find the hidden tryptic peptides', short: 'all peptides' },
@@ -336,7 +337,7 @@ const LEVELS = [
     theme: {
       sky: ['#fff6df', '#f0cd8c'], far: '#c08a3a', matrix: ['#b88238', '#5e3e17'],
       cells: ['#f0c04a', '#dea42c', '#e9b53e'], eps: '#ffeab0', plat: ['#8a5a26', '#d39a52'],
-      mol: '#a8701f', pyo: 0, accent: '#9a6a00', bg: 'tsb',
+      mol: '#a8701f', pyo: 0, accent: '#9a6a00', bg: 'tsb', weather: 'snow',
     },
     intro: [
       'Tryptic soy broth: rich, calm, no PASN.',
@@ -345,7 +346,7 @@ const LEVELS = [
     ],
   },
   {
-    name: 'SNpulse', subtitle: 'TSB, then 15 min PASN', build: buildSNpulse, timeLimit: 110,
+    name: 'SNpulse', subtitle: 'TSB, then 15 min PASN', build: buildSNpulse, timeLimit: 110, medals: [60, 80, 100],
     goals: [
       { id: 'time', label: 'Reach the MS before the pulse ends', req: true },
       { id: 'pep', label: 'Find the hidden tryptic peptides', short: 'all peptides' },
@@ -354,7 +355,7 @@ const LEVELS = [
     theme: {
       sky: ['#eef6e4', '#9fc89c'], far: '#557f4c', matrix: ['#7b934f', '#34472a'],
       cells: ['#dcc55c', '#c8ad40', '#d2bb4e'], eps: '#e9f2c6', plat: ['#4b6a33', '#93b866'],
-      mol: '#4c7a43', pyo: 10, accent: '#3f6b2a', dark: 0.2, bg: 'pasn',
+      mol: '#4c7a43', pyo: 10, accent: '#3f6b2a', dark: 0.2, bg: 'pasn', weather: 'motes',
     },
     intro: [
       'Grown in TSB, then 15 min in PASN: the cell-free, sterile-filtered',
@@ -363,7 +364,7 @@ const LEVELS = [
     ],
   },
   {
-    name: 'SN', subtitle: '~15 h in 30 % PASN', build: buildSN, timeLimit: 0,
+    name: 'SN', subtitle: '~15 h in 30 % PASN', build: buildSN, timeLimit: 0, medals: [110, 160, 230],
     goals: [
       { id: 'cys', n: 6, label: 'Collect 6 cystine', req: true },
       { id: 'gate', label: 'Open the gate to the MS', req: true },
@@ -373,7 +374,7 @@ const LEVELS = [
     theme: {
       sky: ['#d5eeee', '#3f8790'], far: '#2b6268', matrix: ['#4a746d', '#16302f'],
       cells: ['#bdb06c', '#a89955', '#c6bb7a'], eps: '#c6e4dc', plat: ['#2c514c', '#6fa197'],
-      mol: '#246a73', pyo: 22, accent: '#1f5f66', dark: 0.45, bg: 'pasn',
+      mol: '#246a73', pyo: 22, accent: '#1f5f66', dark: 0.45, bg: 'pasn', weather: 'mist',
     },
     intro: [
       'Long-term exposure: 70 % TSB + 30 % PASN for ~15 h.',
@@ -382,7 +383,7 @@ const LEVELS = [
     ],
   },
   {
-    name: 'CF airway', subtitle: 'Bonus level: a cystic fibrosis lung', build: buildCF, timeLimit: 0,
+    name: 'CF airway', subtitle: 'Bonus level: a cystic fibrosis lung', build: buildCF, timeLimit: 0, medals: [200, 290, 400],
     goalKind: 'sputum',
     goals: [
       { id: 'boss', label: 'Clear the mucoid P. aeruginosa colony', req: true },
@@ -393,7 +394,7 @@ const LEVELS = [
     theme: {
       sky: ['#fbe7ea', '#d98f9c'], far: '#c2717f', matrix: ['#d48a95', '#7a3443'],
       cells: ['#f0b3bc', '#e59aa6', '#f5c4cb'], eps: '#f2e7a2', plat: ['#9b4a5a', '#e7a1ad'],
-      mol: '#b05a6a', pyo: 12, accent: '#a33a52', dark: 0.22, debris: 'mucus', bg: 'cf', cough: true,
+      mol: '#b05a6a', pyo: 12, accent: '#a33a52', dark: 0.22, debris: 'mucus', bg: 'cf', cough: true, weather: 'cf',
     },
     intro: [
       'A game setting, not part of our experiment (that used PASN in vitro).',
