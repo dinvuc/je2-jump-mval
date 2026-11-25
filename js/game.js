@@ -30,7 +30,7 @@ const studyPanel = document.getElementById('study-panel');
 const studyButtons = ['study-open', 'study-close', 'study-prev', 'study-next'].map(id => document.getElementById(id)).filter(Boolean);
 configureCanvas();
 function resizeGame() {
-  if (configureCanvas() && L) L.art = buildLevelArt(L, L.def.theme, G.levelIdx);
+  if (configureCanvas() && L) L.art = buildLevelArt(L, L.def.theme, L.artSeed);
 }
 addEventListener('resize', resizeGame);
 if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resizeGame).observe(canvas);
@@ -354,31 +354,25 @@ function startGame() {
   setState('intro');
 }
 
+// Every map has two parts. Run-wide state (time, score, inventory, replicates)
+// lives on L for the whole map; setStageWorld swaps only the terrain and entities.
 function loadLevel(i) {
   const def = LEVELS[i];
-  const b = def.build();
+  const builds = def.stages.map(build => build());
+  const count = type => builds.reduce((n, b) => n + b.ents.filter(e => e.type === type).length, 0);
   L = {
-    def, cols: b.cols, rows: b.rows, grid: b.grid, signs: b.signs, ribo: b.ribo, route: b.route,
-    ents: b.ents.map(e => ({ ...e, x: e.tx * TILE, y: e.ty * TILE, alive: true, t: 0 })),
-    time: 0, cam: 0, camY: 0, cystine: 0, ironBank: 0, ironTotal: 0, points: 0, goalMsgT: 0,
-    fx: [], pops: [], callouts: [], killFeed: [], killCount: {}, movers: [], shots: [], lysis: new Map(), solids: [], plats: [],
-    combo: 0, comboT: 0, kills: 0, peptides: 0, spawnQ: [],
+    def, idx: i, time: 0, cam: 0, camY: 0, cystine: 0, ironBank: 0, ironTotal: 0, points: 0,
+    killFeed: [], killCount: {}, combo: 0, comboT: 0, kills: 0, peptides: 0,
     retries: 0,
     difficulty: G.difficulty,
-    studyStations: G.difficulty < 100 ? STUDY_STATIONS[i] : [],
     timeLimit: def.timeLimit && G.difficulty > 0 ? Math.round(def.timeLimit * (1 + 2 * Math.max(0, 1 - G.difficulty / 100))) : 0,
-    recording: [], ghostIndex: 0,
-    bossActive: false, bossDown: false, bg: b.bg, caveK: 0, jiggle: new Map(), goalSeen: {},
+    recording: [], ghostIndex: 0, bannerT: 0,
+    bossDown: false, caveK: 0, goalSeen: {},
     abNext: 60 * (35 + Math.random() * 15), abWarn: 0, abOn: 0, abExpose: 0, covered: true,
     coughNext: 60 * (14 + Math.random() * 10), coughing: 0, coughWarn: 0, coughFlash: 0,
-    art: buildLevelArt(b, def.theme, i),
+    totalCys: count('cystine'), totalPep: count('peptide'), totalStocks: count('check') + builds.length - 1, stocks: 0,
   };
-  L.totalCys = L.ents.filter(e => e.type === 'cystine').length;
-  L.totalPep = L.ents.filter(e => e.type === 'peptide').length;
-  L.totalStocks = L.ents.filter(e => e.type === 'check').length; L.stocks = 0;
-  for (const e of L.ents) initEntity(e);
-  const start = L.ents.find(e => e.type === 'start');
-  L.respawn = { x: start.x + 4, y: start.y + 4 };
+  setStageWorld(builds[0], 0);
   P = {
     x: L.respawn.x, y: L.respawn.y, w: 24, h: 28, vx: 0, vy: 0,
     onGround: false, coyote: 0, buffer: 0, djReady: true, groundT: 0,
@@ -389,12 +383,38 @@ function loadLevel(i) {
   G.toast = ''; G.toastT = 0; G.failReason = ''; G.shake = 0; G.iris = 45; G.hitStop = 0; G.studyTick = 0;
   G.studyStation = null; G.studyOpen = false; G.studyIndex = 0; renderStudyStation();
   for (const g of def.goals) L.goalSeen[g.id] = g.id === 'reps' || g.id === 'time';
-  L.solids = [];
   L.ghost = loadGhost();
   captureCheckpoint();
   const dashButton = touchBox.querySelector('[data-key="dash"]');
   if (dashButton) dashButton.hidden = G.strain !== 'stk';
   snapCamera();
+}
+// Terrain, entities and everything drawn in world coordinates for one part of a map.
+function setStageWorld(b, stage) {
+  Object.assign(L, {
+    stage, cols: b.cols, rows: b.rows, grid: b.grid, signs: b.signs, ribo: b.ribo, route: b.route, bg: b.bg,
+    ents: b.ents.map(e => ({ ...e, x: e.tx * TILE, y: e.ty * TILE, alive: true, t: 0 })),
+    fx: [], pops: [], callouts: [], movers: [], shots: [], lysis: new Map(), solids: [], plats: [], spawnQ: [],
+    jiggle: new Map(), bossActive: false, goalMsgT: 0,
+    studyStations: G.difficulty < 100 ? STUDY_STATIONS[L.idx][stage] : [],
+    artSeed: L.idx + 10 * stage,
+  });
+  L.art = buildLevelArt(b, L.def.theme, L.artSeed);
+  for (const e of L.ents) initEntity(e);
+  const start = L.ents.find(e => e.type === 'start');
+  L.respawn = { x: start.x + 4, y: start.y + 4 };
+}
+// The gate at the end of part 1 acts as a checkpoint: it saves a stock and
+// carries the run (time, score, replicates, inventory) into part 2.
+function enterStage(stage) {
+  setStageWorld(L.def.stages[stage](), stage);
+  Object.assign(P, { x: L.respawn.x, y: L.respawn.y, vx: 0, vy: 0, ride: null, dash: 0, onGround: false, inv: 60, slow: 0 });
+  L.stocks++;
+  L.bannerT = 200; G.iris = 45; G.shake = 0;
+  captureCheckpoint();
+  snapCamera();
+  AUDIO.play('check'); AUDIO.music(L.def.name);
+  toast(`Stock saved. ${L.def.part2}`, 260);
 }
 
 function initEntity(e) {
@@ -857,6 +877,7 @@ function updateFx() {
   if (L.pops.length) L.pops = L.pops.filter(p => p.life > 0);
   for (const c of L.callouts) { c.life--; c.y -= c.life > 64 ? 1.6 : 0.2; }
   if (L.callouts.length) L.callouts = L.callouts.filter(c => c.life > 0);
+  if (L.bannerT > 0) L.bannerT--;
   for (const k of L.killFeed) { k.life--; k.age++; if (k.bump > 0) k.bump--; }
   if (L.killFeed.length) L.killFeed = L.killFeed.filter(k => k.life > 0);
 }
@@ -1233,6 +1254,9 @@ function updateEntities() {
           toast('Glycerol stock saved: you will restart here.', 140);
           captureCheckpoint();
         }
+        break;
+      case 'stage': // the gate to part 2: a checkpoint that moves the run on
+        if (overlap(P, { x: e.x, y: e.y - TILE, w: TILE * 2, h: TILE * 2 })) { enterStage(L.stage + 1); return; }
         break;
       case 'goal': {
         const box = { x: e.x, y: e.y - TILE, w: TILE * 2, h: TILE * 2 };
@@ -2143,6 +2167,24 @@ function drawEntities(cx, cy) {
         }
         break;
       }
+      case 'stage': { // gate to part 2: a large glowing cryo-vial with an arrow
+        const X = x + 16, Y = y - TILE + 4, pulse = 0.5 + 0.5 * Math.sin(e.t * 0.08);
+        glow(X + 8, Y + 30, 46 + pulse * 8, '#9fd8ff', 0.45 + pulse * 0.2);
+        roundRect(X - 12, Y + 12, 40, 46, [4, 4, 12, 12], 'rgba(235,245,255,0.88)', '#7d93a8', 2);
+        roundRect(X - 9, Y + 30, 34, 25, [0, 0, 10, 10], '#f3c22f');
+        roundRect(X - 16, Y, 48, 14, 4, '#2eaa5c', '#1e7a40', 1.5);
+        ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(X - 5, Y + 16, 3, 36);
+        for (let k = 0; k < 3; k++) {
+          const a = e.t * 0.05 + k * 2.1;
+          text('*', X + 8 + Math.cos(a) * 30, Y + 34 + Math.sin(a) * 22, { size: 14, color: '#bfe6ff', align: 'center', weight: '900' });
+        }
+        const ax = X + 8 + Math.sin(e.t * 0.12) * 3;
+        ctx.strokeStyle = '#1e7a40'; ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.beginPath(); ctx.moveTo(ax - 7, Y + 36); ctx.lineTo(ax + 4, Y + 43); ctx.lineTo(ax - 7, Y + 50); ctx.stroke();
+        roundRect(X - 30, Y - 26, 76, 20, 10, 'rgba(14,36,45,0.85)');
+        text('PART 2 ▶', X + 8, Y - 11, { size: 13, color: '#9fffe0', align: 'center', weight: '900' });
+        break;
+      }
       case 'goal': { // the LC-MS/MS (or, in the CF level, a sputum sample cup)
         const miss = missingGoals().length, nReq = L.def.goals.filter(g => g.req).length;
         const status = () => { if (nReq) text(miss ? `${nReq - miss}/${nReq} goals` : 'ready!', x + TILE, y - TILE - 32, { size: 12, color: miss ? '#a0202f' : '#1b7f3b', align: 'center', weight: '800' }); };
@@ -2511,6 +2553,21 @@ function drawCallouts() {
   }
 }
 
+// "PART 2" title card after the gate: slides in, holds, then fades.
+function drawStageBanner() {
+  if (!(L.bannerT > 0)) return;
+  const age = 200 - L.bannerT, slide = Math.pow(Math.max(0, 1 - age / 18), 3) * -VIEW_W;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, L.bannerT / 30);
+  ctx.translate(slide, 0);
+  roundRect(VIEW_W / 2 - 230, 170, 460, 86, 18, 'rgba(10,31,43,0.88)', L.def.theme.accent, 3);
+  ctx.font = `900 40px ${FONT}`; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+  ctx.lineWidth = 7; ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.strokeText(`${L.def.name} · PART ${L.stage + 1}`, VIEW_W / 2, 220);
+  ctx.fillStyle = '#fff3c4'; ctx.fillText(`${L.def.name} · PART ${L.stage + 1}`, VIEW_W / 2, 220);
+  text(L.def.part2Title, VIEW_W / 2, 244, { size: 15, color: '#c3ffdf', align: 'center', weight: '800' });
+  ctx.restore();
+}
+
 // HUD log of what you defeated, newest on top; repeats of the same enemy stack as ×n.
 function drawKillFeed() {
   let y = 112;   // below the cough warning (CF) and the exposure panel (SNpulse)
@@ -2843,6 +2900,7 @@ function drawWorld() {
   drawSignText(cx, cy);
   drawGoalList();
   drawKillFeed();
+  drawStageBanner();
   drawHUD();
   drawAbilityHUD();
 }

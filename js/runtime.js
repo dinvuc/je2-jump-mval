@@ -1,6 +1,6 @@
 'use strict';
 // Rendering, movement abilities, checkpoints and personal ghosts.
-const RUN_VERSION = 4;
+const RUN_VERSION = 5;
 let renderScale = 1;
 
 // Keep physics in logical pixels; draw vectors at the display's actual density.
@@ -41,7 +41,7 @@ function loadGhost() {
   try {
     const g = JSON.parse(localStorage.getItem(`je2jump_ghost_${runKey()}`));
     if (!g || g.v !== RUN_VERSION || !Array.isArray(g.samples) || g.samples.length > 12000) return null;
-    if (!g.samples.every((p, i) => Array.isArray(p) && p.length === 4 && p.every(Number.isFinite) && p[0] >= 0 && (!i || p[0] > g.samples[i - 1][0]))) return null;
+    if (!g.samples.every((p, i) => Array.isArray(p) && (p.length === 4 || p.length === 5) && p.every(Number.isFinite) && p[0] >= 0 && (!i || p[0] > g.samples[i - 1][0]))) return null;
     return g;
   } catch { return null; }
 }
@@ -77,8 +77,8 @@ function retryCheckpoint() {
   Object.assign(L, saved.world); P = saved.player;
   L.time += penalty; L.retries++;
   if (penalty && L.recording.length < 11998) {
-    L.recording.push([L.time - 1, Math.round(oldPosition[0]), Math.round(oldPosition[1]), oldPosition[2]],
-      [L.time, Math.round(P.x), Math.round(P.y), P.face]);
+    L.recording.push([L.time - 1, Math.round(oldPosition[0]), Math.round(oldPosition[1]), oldPosition[2], L.stage],
+      [L.time, Math.round(P.x), Math.round(P.y), P.face, L.stage]);
   }
   Object.assign(L, { fx: [], pops: [], shots: [], combo: 0, comboT: 0,
     abWarn: 0, abOn: 0, abExpose: 0, coughing: 0, coughWarn: 0, coughFlash: 0, goalMsgT: 0 });
@@ -90,13 +90,15 @@ function retryCheckpoint() {
 }
 
 function recordRun() {
-  if (L.time % 6 === 0 && L.recording.length < 12000 && (!L.recording.length || L.recording[L.recording.length - 1][0] < L.time)) L.recording.push([L.time, Math.round(P.x), Math.round(P.y), P.face]);
+  if (L.time % 6 === 0 && L.recording.length < 12000 && (!L.recording.length || L.recording[L.recording.length - 1][0] < L.time)) L.recording.push([L.time, Math.round(P.x), Math.round(P.y), P.face, L.stage]);
 }
 function drawGhost() {
   if (!G.ghostOn || !L.ghost || !L.ghost.samples.length) return;
   const a = L.ghost.samples;
   while (L.ghostIndex + 1 < a.length && a[L.ghostIndex + 1][0] <= L.time) L.ghostIndex++;
   const p = a[L.ghostIndex], n = a[L.ghostIndex + 1] || p;
+  // Samples carry the map part they were recorded in (older samples: part 1).
+  if ((p[4] || 0) !== L.stage || (n[4] || 0) !== L.stage) return;
   if (L.time < p[0] || L.time > a[a.length - 1][0]) return;
   const t = n[0] === p[0] ? 0 : clamp((L.time - p[0]) / (n[0] - p[0]), 0, 1);
   const x = p[1] + (n[1] - p[1]) * t + 12, y = p[2] + (n[2] - p[2]) * t + 14;
@@ -137,9 +139,12 @@ function drawAbilityHUD() {
 
 // The exposure front is paced to the actual sample deadline, rather than a
 // second lethal timer. It energises products behind it and is visible in HUD.
+// Each part of the map gets its share of the deadline (def.stageShare).
 function exposureFrontY() {
-  const start = L.ents.find(e => e.type === 'start'), goal = L.ents.find(e => e.type === 'goal');
-  const t = clamp(L.time / ((L.timeLimit || L.def.timeLimit) * 60), 0, 1);
+  const start = L.ents.find(e => e.type === 'start'), goal = L.ents.find(e => e.type === 'goal' || e.type === 'stage');
+  const shares = L.def.stageShare || L.def.stages.map(() => 1 / L.def.stages.length);
+  const before = shares.slice(0, L.stage).reduce((a, b) => a + b, 0);
+  const t = clamp((L.time / ((L.timeLimit || L.def.timeLimit) * 60) - before) / shares[L.stage], 0, 1);
   return start.y + 160 - t * (start.y - goal.y + 160);
 }
 function drawExposureFront(cx, cy) {

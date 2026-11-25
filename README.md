@@ -24,32 +24,49 @@ help with speed, exploration and recovery. Movement abilities are game metaphors
 not measured phenotypes. There are no activation buttons, receptors, timed bridges,
 locked gates or teleport channels.
 
-1. **TSB — the nutrient garden (88 × 30 tiles):** a tutorial in three rooms.
-   Steps, a first gap and low debris lead to the canopy hill: bounce or climb
-   onto it and leap its shaft, or walk the tunnel below, where a flow channel
-   pushes against you. Floating pillars and a backward-pushing track over open
-   gaps lead up to the sample terrace. Peptides sit above the canopy, in the
-   tunnel and on a high strand. No PASN means no PASN hazards, so no foam.
-2. **SNpulse — the exposure run (40 × 68):** grown in TSB, then 15 min PASN.
-   Four climbs, each with its own hazard: a foam well with stepping stones and
-   a drifting foam clump; a flow channel and strand ladder with foam geysers;
-   foam strips and zigzag flow tracks; a bubble chimney (with strands beside it)
-   and a final foam-and-geyser gauntlet. Checkpoints sit between climbs.
+Every map has **two parts**. Part 1 ends at a glowing "PART 2" vial: walking into
+it saves a stock (like a checkpoint) and moves you straight into part 2 of the same
+map. Time, score, replicates, pickups and power-ups carry over; there is no
+results screen in between. Retrying in part 2 returns to its start.
+
+1. **TSB — the nutrient garden (part 1: 88 × 30 tiles, part 2: 84 × 40):**
+   Part 1 is a tutorial in three rooms. Steps, a first gap and low debris lead
+   to the canopy hill: bounce or climb onto it and leap its shaft, or walk the
+   tunnel below, where a flow channel pushes against you. Floating pillars and
+   a backward-pushing track over open gaps lead up to the terrace gate.
+   Part 2 starts at a debris barricade (climb it or shoot through it), then flow
+   stairs whose tracks push in turn over an open gap, a bubble chimney with
+   strands beside it, and a fast flow tunnel with debris to hop, up to the
+   sample terrace. No PASN means no PASN hazards, so no foam.
+2. **SNpulse — the exposure run (40 × 68, then 44 × 80):** grown in TSB, then
+   15 min PASN. Part 1 has four climbs, each with its own hazard: a foam well
+   with stepping stones and a drifting foam clump; a flow channel and strand
+   ladder with foam geysers; foam strips and zigzag flow tracks; a bubble chimney
+   and a foam-and-geyser gauntlet. Part 2 adds a row of floor geysers, a strand
+   ladder with foam on its outer ends, a foam pool with one stepping stone, a
+   crumbling bridge with permanent strands above it, a flow elevator with
+   drifting foam, and a last gauntlet below the MS.
    The blue exposure front accelerates pyocyanin sources and launchers behind
-   it. Reach the MS within 145 game seconds; the HUD maps this to the experiment's
+   it; it covers part 1 in the first 42 % of the deadline and part 2 in the rest.
+   Reach the MS within 300 game seconds; the HUD maps this to the experiment's
    15-minute pulse. The front adds no contact damage.
-3. **SN — weathered biofilm (54 × 54):** ~15 h in 70 % TSB + 30 % PASN.
-   Descend over foam-capped steps past drifting foam, then take the roof with
-   its foam geysers or the fast flow channel underneath. The spillway mixes
-   flow tracks, a foam-edged ledge and drifting foam; the foam lake at the bottom
-   is crossed on a pillar, a track and a ledge between two geysers.
+3. **SN — weathered biofilm (54 × 54, then 54 × 62):** ~15 h in 70 % TSB +
+   30 % PASN. Part 1 descends over foam-capped steps past drifting foam, then
+   takes the roof with its foam geysers or the fast flow channel underneath,
+   the spillway, and a foam lake crossed between two geysers. Part 2 goes down
+   and to the left: foam-capped ledges, three flow-track switchbacks that carry
+   you toward foam at their far ends, pillars over an abyss with drifting foam
+   swinging through each gap, and a geyser in front of the MS.
    Nutrient collection is a bonus, so reaching the sample completes the level.
-4. **CF airway (40 × 76, bonus):** a climb built from stacked cilia tracks
-   pushing in alternating directions, with mucus, foam patches, drifting foam,
-   a spring and optional crumbling shortcuts. Jump takeoffs on the main route
-   are dry. Brace with down during a cough or hold jump to ride the updraft.
-   A checkpoint precedes the mucoid colony boss, with cover, ammunition blocks
-   and upper escape ledges. Defeat it and reach the sputum sample.
+4. **CF airway (40 × 76, then 40 × 90, bonus):** part 1 is a climb built from
+   stacked cilia tracks pushing in alternating directions, with mucus, foam
+   patches, drifting foam, a spring and optional crumbling shortcuts, up to the
+   gate in the upper airway. Part 2 crosses a mucus bog, a cilia gallery with
+   foam on the track, a crumbling bridge, a cilia lift whose tracks carry you
+   toward foam, and the colony approach. Only then comes the mucoid colony boss,
+   with cover, ammunition blocks and upper escape ledges. Defeat it and reach
+   the sputum sample. Jump takeoffs on the main routes are dry. Brace with down
+   during a cough or hold jump to ride the updraft.
    **This setting is not part of the course experiment.**
 
 Defeated enemies are named twice: a stamped callout appears where they were,
@@ -61,10 +78,10 @@ the view darkens and music is muffled inside them.
 
 | level | required | bonus stars |
 |---|---|---|
-| TSB | reach the sample terrace | all 3 peptides · keep 3/3 replicates |
-| SNpulse | reach the MS before the exposure clock expires | all 3 peptides · neutralise 5 products |
-| SN | reach the MS | collect 8 cystine · all 3 peptides · keep 3/3 replicates |
-| CF airway | defeat the mucoid colony and reach the sample | neutralise 6 cells · all 3 peptides · keep 3/3 replicates |
+| TSB | reach the sample terrace at the end of part 2 | all 6 peptides · keep 3/3 replicates |
+| SNpulse | reach the MS at the end of part 2 before the exposure clock expires | all 6 peptides · neutralise 8 products |
+| SN | reach the MS at the end of part 2 | collect 16 cystine · all 6 peptides · keep 3/3 replicates |
+| CF airway | defeat the mucoid colony atop part 2 and reach the sample | neutralise 12 cells · all 6 peptides · keep 3/3 replicates |
 
 PASN is cell-free, sterile-filtered spent medium of *P. aeruginosa* PAO1.
 The three course levels contain only secreted products. Living *P. aeruginosa*
@@ -72,7 +89,7 @@ appears only in the separate CF setting.
 
 **Medals and ghosts:** records are separate per level and strain. Initial gold,
 silver and bronze targets appear in the intro; stk gets 12 % more time and stp
-gets 8 % more. New layouts use version 4 records, preserving earlier records in
+gets 8 % more. New layouts use version 5 records, preserving earlier records in
 browser storage. Your best run records a translucent personal ghost (G toggles it),
 with at most 12,000 positions, approximately 20 minutes. Everything stays in your
 browser; storage failure never prevents play. Medal targets still need player tuning.
@@ -86,7 +103,7 @@ penalty. **Hard** runs at 115% pace and halves protection after hits, from 1.5 t
 routes and strain abilities stay the same in all modes. The real experiment's
 pulse was still 15 minutes; difficulty only changes the game.
 
-In Study, four marked **biology stations** per level offer optional reading.
+In Study, three or four marked **biology stations** per part offer optional reading.
 Approach a station, then click **Open biology note** or press **B** to read.
 Cards never open automatically. The note appears to one side; the world keeps
 running and movement controls still work. Roll away and the note closes
@@ -116,7 +133,7 @@ boss is unaffected. Subsequent waves are 55–80 s apart.
 | three culture flasks | lives represented as replicates; lose all and n = 0 |
 | S–S cystine | nutrient collectible; TcyABC is the cystine transporter (TcyA: B7H15_13375) |
 | Fe | every three restore a replicate |
-| peptide chain ending in K | optional collectible, three per level; trypsin cuts after K/R in proteomics |
+| peptide chain ending in K | optional collectible, three per part (six per map); trypsin cuts after K/R in proteomics |
 | ribosome block | bump from below to translate a protein power-up |
 | pink PSM helices | shooting ammunition, 12 per pickup; X/K/Shift fires |
 | golden staphyloxanthin | 12 s protection against ROS |
@@ -134,6 +151,7 @@ boss is unaffected. Subsequent waves are 55–80 s apart.
 | pale cracked cells | collapse 0.6 s after landing and return after 4 s; optional routes only |
 | air stone / swollen cell | ride a bubble / bounce upwards |
 | cryo-vial | checkpoint; saved stocks are counted in the HUD |
+| large vial marked PART 2 | end of part 1: saves a stock and moves on to part 2 |
 | green rods / alginate colony | living P. aeruginosa cells / boss in the CF setting only |
 | info vesicle | approach to read a short tip |
 
@@ -253,7 +271,9 @@ Use ground/solid for terrain, pit for gaps that drop out of the level, plat for
 permanent one-way strands, lysed for optional crumbling detours, carve for walk-in
 passages, cilia/flow for conveyors, foam for static foam, and put for entities.
 vent, spring, ribo, rosgun, geyser, drift, sign, arrow and landmark add their
-named objects. L.route lists main-route terrain waypoints used by the regression search.
+named objects; stage marks the end of part 1. L.route lists main-route terrain
+waypoints used by the regression search. Each map lists its two builders in
+LEVELS[i].stages, and STUDY_STATIONS holds one station list per part.
 
 Keep main-route rises to two rows and leave dry takeoffs. A full single jump
 reaches about three rows and clears about three tiles of foam from flat ground.
@@ -266,7 +286,7 @@ Run node tests/game.test.cjs. The dependency-free checks cover every level and
 strain, removal of activation mechanics, sample and boss goals, dash collision,
 glide limits, checkpoint snapshots, timed retries, versioned records, ghosts,
 storage errors, scaling and pointer input. tests/routes.cjs searches the real
-collision functions through each main route using the basic single jump, with
+collision functions through the main route of each part using the basic single jump, with
 moving surfaces and crumbling platforms unavailable, conveyors applied and any
 contact with static foam rejected, and checks entry and return routes for the
 peptide detours. This proves a permanent main terrain route; it does not certify

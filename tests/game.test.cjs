@@ -9,9 +9,10 @@ check('high-density canvas preserves logical coordinates', () => {
   assert.equal(mainCanvas.width, 1920); assert.equal(mainCanvas.height, 1088);
   assert.equal(mainCanvas.getContext('2d').transform[0], 2);
 });
-check('every level starts, updates and draws with every strain', () => {
-  for (const strain of ['anc','stk','stp']) for (let level = 0; level < 4; level++) {
-    reset(level,strain); run('for (let i=0;i<180;i++) { update(); if(i%30===0) draw(); }');
+check('every part of every level starts, updates and draws with every strain', () => {
+  for (const strain of ['anc','stk','stp']) for (let level = 0; level < 4; level++) for (const stage of [0,1]) {
+    reset(level,strain); if (stage) run('enterStage(1)');
+    run('for (let i=0;i<180;i++) { update(); if(i%30===0) draw(); }');
     assert.equal(run('G.state'),'play'); assert(run('Number.isFinite(P.x) && Number.isFinite(P.y)'));
     assert(run('L.art.tiles.width * L.art.tiles.height <= 16010000'));
     run('P.x = (L.cols - 2) * TILE; P.y = 0; snapCamera(); draw();');
@@ -21,22 +22,38 @@ check('activation routes and controls have been removed from every level', () =>
   for (let level=0;level<4;level++) {
     reset(level);
     assert(!run("L.ents.some(e => ['relay','membrane','gate','phos','shuttle','agrb','agrc','channel'].includes(e.type))"));
-    assert.equal(run('L.totalPep'),3);
+    assert.equal(run('L.totalPep'),6); assert.equal(run('L.def.stages.length'),2);
     assert(!run("L.def.goals.some(g => g.req && ['cys','kills','network','gate'].includes(g.id))"));
   }
   assert.equal(run('KEYMAP.KeyE'),undefined); assert.equal(run('KEYMAP.KeyQ'),undefined);
   const html=fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
   assert(!html.includes('data-key="pulse"')); assert(html.includes('js/runtime.js'));
 });
+check('part 1 ends at a gate that saves a stock and carries the run into part 2', () => {
+  for (let level=0;level<4;level++) {
+    reset(level);
+    assert(!run("L.ents.some(e => e.type==='goal' || e.type==='boss')")); assert.equal(run("L.ents.filter(e => e.type==='stage').length"),1);
+    run("L.time=900; L.points=1234; L.cystine=4; L.peptides=1; L.kills=2; P.reps=2; P.ammo=7; var gate=L.ents.find(e=>e.type==='stage'); P.x=gate.x; P.y=gate.y; updateEntities();");
+    assert.equal(run('G.state'),'play'); assert.equal(run('L.stage'),1);
+    assert.equal(run('L.time'),900); assert.equal(run('L.points'),1234); assert.equal(run('L.cystine'),4);
+    assert.equal(run('L.peptides'),1); assert.equal(run('L.kills'),2); assert.equal(run('P.reps'),2); assert.equal(run('P.ammo'),7);
+    assert(run('P.x === L.respawn.x && P.y === L.respawn.y')); assert(run("!L.ents.some(e => e.type==='stage')"));
+    assert.equal(run("L.ents.filter(e => e.type==='goal').length"),1); assert.equal(run('L.bannerT'),200);
+    assert.equal(run("L.ents.some(e => e.type==='boss')"), level===3);
+    run('P.x += 64; L.time += 60; retryCheckpoint();');
+    assert.equal(run('L.stage'),1); assert(run('P.x === L.respawn.x')); assert.equal(run('L.points'),1234);
+    run('draw(); for (let i=0;i<220;i++) updateFx(); draw();'); assert.equal(run('L.bannerT'),0);
+  }
+});
 check('TSB and SN exits accept the sample without collecting or unlocking anything', () => {
   for (const level of [0,2]) {
-    reset(level); assert(!run('goalStatus(L.def.goals[0]).done'));
+    reset(level); run('enterStage(1)'); assert(!run('goalStatus(L.def.goals[0]).done'));
     run("var goal = L.ents.find(e => e.type === 'goal'); P.x=goal.x; P.y=goal.y; updateEntities();");
     assert.equal(run('G.state'),'levelDone'); assert.equal(run('L.cystine'),0);
   }
 });
 check('the CF sample still requires defeating the boss, not a cell-kill quota', () => {
-  reset(3); run("var goal=L.ents.find(e => e.type==='goal'); P.x=goal.x; P.y=goal.y; updateEntities();");
+  reset(3); run("enterStage(1); var goal=L.ents.find(e => e.type==='goal'); P.x=goal.x; P.y=goal.y; updateEntities();");
   assert.equal(run('G.state'),'play'); run('L.bossDown=true; L.kills=0; updateEntities();');
   assert.equal(run('G.state'),'levelDone');
 });
@@ -101,11 +118,24 @@ check('expired exposure-clock retries restart the level', () => {
   reset(1); run('L.time=L.def.timeLimit*60; retryCheckpoint();');
   assert.equal(run('L.time'),0); assert.equal(run('G.state'),'play');
 });
-check('exposure advances to the sample and accelerates launchers', () => {
-  reset(1); run('L.time=L.def.timeLimit*60;');
+check('exposure advances through both parts to the sample and accelerates launchers', () => {
+  reset(1); const split = run('L.def.stageShare[0] * L.def.timeLimit * 60');
+  run('L.time=' + split + ';');
+  assert.equal(run('exposureFrontY()'),run("L.ents.find(e=>e.type==='stage').y"));
+  run("var gun=L.ents.find(e=>e.type==='rosgun'); gun.cool=0; P.x=gun.x-100; P.y=gun.y; updateEntities();");
+  assert.equal(run('gun.cool'),115);
+  run('enterStage(1); L.time=' + split + ';');
+  assert.equal(run('exposureFrontY()'),run("L.ents.find(e=>e.type==='start').y + 160"));
+  run('L.time=L.def.timeLimit*60;');
   assert.equal(run('exposureFrontY()'),run("L.ents.find(e=>e.type==='goal').y"));
-  run("const gun=L.ents.find(e=>e.type==='rosgun'); gun.cool=0; P.x=gun.x-100; P.y=gun.y; updateEntities();");
-  assert.equal(run("L.ents.find(e=>e.type==='rosgun').cool"),115);
+});
+check('ghost samples record their map part and only replay in that part', () => {
+  reset(1); run('enterStage(1); L.time=12; recordRun();');
+  assert.equal(run('L.recording[L.recording.length-1][4]'),1);
+  run("L.ghost={v:5,samples:[[0,10,10,1,0],[600,20,20,1,0]]}; L.ghostIndex=0; L.time=300; G.ghostOn=true; var drawn=0; var original=drawCoccus; drawCoccus=function(){drawn++;}; drawGhost();");
+  assert.equal(run('drawn'),0);
+  run('L.ghost.samples.forEach(s=>s[4]=1); L.ghostIndex=0; drawGhost(); drawCoccus=original;');
+  assert.equal(run('drawn'),1);
 });
 check('cough controls give predictable air lift and bracing', () => {
   reset(3); run('P.onGround=false; P.vy=0; P.vx=2; L.coughing=70; keys.jump=false; updateCough();');
@@ -116,9 +146,9 @@ check('cough controls give predictable air lift and bracing', () => {
 check('records and ghosts use the new layout version and stay strain-specific', () => {
   reset(); run('L.time=600; L.recording=[[6,68,804,1],[600,2700,548,1]]; finishLevel();');
   assert.equal(run('loadTimes()[runKey()]'),10); assert.equal(run('loadGhost().samples.length'),2);
-  assert.equal(run('RUN_VERSION'),4);
+  assert.equal(run('RUN_VERSION'),5);
   reset(0,'stk'); assert.equal(run('loadTimes()[runKey()]'),undefined); assert.equal(run('L.ghost'),null);
-  assert.equal(run('medalTargets(L.def)[0]'),73);
+  assert.equal(run('medalTargets(L.def)[0]'),146);
   reset(1,'stk'); assert(run('medalTargets(L.def).every(t => t <= L.def.timeLimit)'));
 });
 check('resizing and scaled pointer input preserve game and menu coordinates', () => {
@@ -151,8 +181,8 @@ check('hard runs faster, shortens hit protection and keeps separate records', ()
   reset(0,'anc',150); run('for(let i=0;i<60;i++) update();');
   assert.equal(run('G.state'),'play'); assert(run('L.time >= 68 && L.time <= 69'));
   run("hurt('ros','test');"); assert.equal(run('P.inv'),45); assert.equal(run('P.reps'),2);
-  assert.equal(run('runKey()'),'4:TSB:anc:hard'); assert.equal(run('bestScoreKey()'),'je2jump_v3_best_hard');
-  reset(1,'anc',150); assert.equal(run('L.timeLimit'),145);
+  assert.equal(run('runKey()'),'5:TSB:anc:hard'); assert.equal(run('bestScoreKey()'),'je2jump_v3_best_hard');
+  reset(1,'anc',150); assert.equal(run('L.timeLimit'),300);
   assert.equal(run('menuItems().length'),6); run('update(); draw();'); assert.equal(run('G.state'),'play');
 });
 check('lower difficulty slows the world while normal mode keeps the original cadence', () => {
@@ -188,23 +218,24 @@ check('station notes open only on request, keep movement live and close on depar
   reset(0); run('pressed.biology=true; update();'); assert.equal(controls['study-controls'].hidden,true);
 });
 check('study assistance protects replicates, extends the pulse and permits free retries at zero', () => {
-  reset(1,'anc',50); assert.equal(run('L.timeLimit'),290);
+  reset(1,'anc',50); assert.equal(run('L.timeLimit'),600);
   run("hurt('ros','test');"); assert.equal(run('P.reps'),2); assert.equal(run('P.inv'),180);
   reset(1,'anc',0); run("hurt('ros','test'); loseReplicate('fall'); L.time=20000; updatePlay();");
   assert.equal(run('P.reps'),3); assert.equal(run('L.timeLimit'),0); assert.equal(run('G.state'),'play');
   run('retryCheckpoint();'); assert.equal(run('L.time'),20001);
   assert.equal(run('G.state'),'play'); assert(run('Number.isFinite(exposureFrontY())'));
   reset(1); run("hurt('ros','test');"); assert.equal(run('P.inv'),90);
-  assert.equal(run('L.timeLimit'),145);
+  assert.equal(run('L.timeLimit'),300);
 });
 check('stations cover all topics on permanent floors without changing the layouts', () => {
   const topics=new Set();
-  for(let level=0;level<4;level++) {
-    reset(level); const terrain=run('JSON.stringify(L.grid)'); assert.equal(run('L.studyStations.length'),0);
-    reset(level,'anc',0); assert.equal(run('JSON.stringify(L.grid)'),terrain);
-    assert.equal(run('L.studyStations.length'),4);
+  for(let level=0;level<4;level++) for(const stage of [0,1]) {
+    const enter = stage ? 'enterStage(1);' : '';
+    reset(level); run(enter); const terrain=run('JSON.stringify(L.grid)'); assert.equal(run('L.studyStations.length'),0);
+    reset(level,'anc',0); run(enter); assert.equal(run('JSON.stringify(L.grid)'),terrain);
+    const count=run('L.studyStations.length'); assert(count>=3);
     assert(run("L.studyStations.every(s=>isSolid(tileAt(s.tx,s.ty+1)) || oneWay(tileAt(s.tx,s.ty+1)))"));
-    for(let index=0;index<4;index++) {
+    for(let index=0;index<count;index++) {
       run('var station=L.studyStations['+index+']; P.x=station.tx*TILE+4; P.y=station.ty*TILE+4; syncStudyStation();');
       assert.equal(controls['study-panel'].hidden,true);
       controls['study-open'].handlers.click();
@@ -219,18 +250,18 @@ check('stations cover all topics on permanent floors without changing the layout
 });
 check('study records, ghosts and best scores never overwrite normal records', () => {
   reset(); run('L.time=1200; L.recording=[[6,68,804,1],[1200,2700,548,1]]; finishLevel();');
-  const normalTime=run('loadTimes()[runKey()]'), normalGhost=storage.get('je2jump_ghost_4:TSB:anc');
+  const normalTime=run('loadTimes()[runKey()]'), normalGhost=storage.get('je2jump_ghost_5:TSB:anc');
   storage.set('je2jump_v3_best','9000');
   reset(0,'anc',0); run('L.time=600; L.recording=[[6,68,804,1],[600,2700,548,1]]; finishLevel(); saveBest(100);');
   assert.equal(run('loadTimes()[runKey()]'),10);
   assert.equal(storage.get('je2jump_v3_best'),'9000');
-  assert.equal(storage.get('je2jump_ghost_4:TSB:anc'),normalGhost);
+  assert.equal(storage.get('je2jump_ghost_5:TSB:anc'),normalGhost);
   reset(); assert.equal(run('loadTimes()[runKey()]'),normalTime);
   assert.equal(run('loadGhost().samples[1][0]'),JSON.parse(normalGhost).samples[1][0]);
 });
 check('malformed storage and a full quota never prevent playing', () => {
   storage.set('je2jump_v3_times','"bad"'); assert.equal(run('Object.keys(loadTimes()).length'),0);
-  reset(); storage.set('je2jump_ghost_4:TSB:anc','{"v":4,"samples":[[null,0,0,1]]}');
+  reset(); storage.set('je2jump_ghost_5:TSB:anc','{"v":5,"samples":[[null,0,0,1]]}');
   assert.equal(run('loadGhost()'),null);
   run('localStorage.setItem=()=>{throw new Error("quota");}; L.time=600; finishLevel();');
   assert.equal(run('G.state'),'levelDone');
