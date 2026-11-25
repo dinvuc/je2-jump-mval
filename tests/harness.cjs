@@ -29,6 +29,11 @@ function makeCanvas() {
 }
 const mainCanvas = makeCanvas();
 const touch = { hidden: true, querySelectorAll: () => [], querySelector: () => null };
+const controls = Object.fromEntries(['run-settings', 'difficulty', 'difficulty-value', 'difficulty-help'].map(id => [id, {
+  hidden: false, value: '100', textContent: '', handlers: {}, attributes: {},
+  addEventListener(name, fn) { this.handlers[name] = fn; },
+  setAttribute(name, value) { this.attributes[name] = value; },
+}]));
 const sandbox = vm.createContext({
   console, Math, Set, Map, Number, Array, Object, JSON, structuredClone,
   performance: { now: () => 1000 }, requestAnimationFrame() {},
@@ -36,7 +41,7 @@ const sandbox = vm.createContext({
   matchMedia: () => ({ matches: false }), window: { devicePixelRatio: 2 },
   localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) },
   document: { createElement: makeCanvas, addEventListener() {},
-    getElementById: id => id === 'game' ? mainCanvas : id === 'touch' ? touch : null },
+    getElementById: id => id === 'game' ? mainCanvas : id === 'touch' ? touch : controls[id] || null },
 });
 const run = code => vm.runInContext(code, sandbox);
 for (const file of ['facts', 'levels', 'runtime', 'game']) {
@@ -44,6 +49,6 @@ for (const file of ['facts', 'levels', 'runtime', 'game']) {
   new vm.Script(fs.readFileSync(filename, 'utf8'), { filename }).runInContext(sandbox);
 }
 
-const reset = (level = 0, strain = 'anc') => run("for (const key in keys) keys[key] = false; G.strain = '" + strain + "'; G.levelIdx = " + level + "; loadLevel(" + level + "); setState('play');");
-module.exports = { run, reset, storage, events, mainCanvas, sandbox,
+const reset = (level = 0, strain = 'anc', difficulty = 100) => run("for (const key in keys) keys[key] = false; G.studySeen = {}; G.studyReview = null; G.difficulty = " + difficulty + "; G.strain = '" + strain + "'; G.levelIdx = " + level + "; loadLevel(" + level + "); setState('play');");
+module.exports = { run, reset, storage, events, mainCanvas, sandbox, controls,
   setDisplayWidth(value) { displayWidth = value; events.resize(); } };

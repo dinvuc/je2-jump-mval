@@ -33,7 +33,10 @@ function drawTerrain(surface, x, y) {
 function medalTargets(def, strain = G.strain) {
   return def.medals.map(t => Math.min(def.timeLimit || Infinity, Math.round(t * STRAINS[strain].medalFactor)));
 }
-function runKey(def = L.def, strain = G.strain) { return `${RUN_VERSION}:${def.name}:${strain}`; }
+function runKey(def = L.def, strain = G.strain) {
+  const key = `${RUN_VERSION}:${def.name}:${strain}`;
+  return G.difficulty < 100 ? `${key}:study:${G.difficulty}` : key;
+}
 function loadGhost() {
   try {
     const g = JSON.parse(localStorage.getItem(`je2jump_ghost_${runKey()}`));
@@ -65,14 +68,15 @@ function captureCheckpoint() {
 }
 function retryCheckpoint() {
   if (!L || !L.checkpoint) return;
-  if (L.def.timeLimit && L.time / 60 + 3 >= L.def.timeLimit) {
+  const penalty = L.difficulty === 0 ? 0 : 180;
+  if (L.timeLimit && L.time / 60 + penalty / 60 >= L.timeLimit) {
     loadLevel(G.levelIdx); setState('play'); return;
   }
   const saved = structuredClone(L.checkpoint);
   const oldPosition = [P.x, P.y, P.face];
   Object.assign(L, saved.world); P = saved.player;
-  L.time += 180; L.retries++;
-  if (L.recording.length < 11998) {
+  L.time += penalty; L.retries++;
+  if (penalty && L.recording.length < 11998) {
     L.recording.push([L.time - 1, Math.round(oldPosition[0]), Math.round(oldPosition[1]), oldPosition[2]],
       [L.time, Math.round(P.x), Math.round(P.y), P.face]);
   }
@@ -82,7 +86,7 @@ function retryCheckpoint() {
   for (const k in keys) keys[k] = false;
   G.hitStop = 0; G.shake = 0; G.failReason = ''; G.iris = 0;
   snapCamera(); setState('play');
-  toast('Stock restored · +3 seconds. R retries instantly; medals use your full run time.', 180);
+  toast(penalty ? 'Stock restored · +3 seconds. R retries instantly; medals use your full run time.' : 'Study stock restored · no time penalty.', 180);
 }
 
 function recordRun() {
@@ -125,13 +129,17 @@ function drawAbilityHUD() {
     text(ahead > 0 ? ahead + ' tiles clear' : 'Sources fire faster', 866, 94, { size: 12, color: '#e6f3fa', align: 'center' });
   }
   text('R retry stock · G ghost ' + (G.ghostOn ? 'on' : 'off'), VIEW_W - 18, VIEW_H - 14, { size: 12, color: '#f5fcff', align: 'right', weight: '700' });
+  if (L.difficulty < 100) {
+    roundRect(210, 58, 250, 30, 10, 'rgba(10,31,43,0.92)', '#a7e0d4', 1);
+    text(`STUDY · ${L.difficulty}% · B biology notes`, 222, 78, { size: 12, color: '#c3ffdf', weight: '800' });
+  }
 }
 
 // The exposure front is paced to the actual sample deadline, rather than a
 // second lethal timer. It energises products behind it and is visible in HUD.
 function exposureFrontY() {
   const start = L.ents.find(e => e.type === 'start'), goal = L.ents.find(e => e.type === 'goal');
-  const t = clamp(L.time / (L.def.timeLimit * 60), 0, 1);
+  const t = clamp(L.time / ((L.timeLimit || L.def.timeLimit) * 60), 0, 1);
   return start.y + 160 - t * (start.y - goal.y + 160);
 }
 function drawExposureFront(cx, cy) {
@@ -146,4 +154,84 @@ function drawExposureFront(cx, cy) {
   ctx.beginPath();
   for (let x = 0; x <= VIEW_W; x += 8) { const yy = y + Math.sin(x * 0.025 + L.time * 0.035) * 6; if (!x) ctx.moveTo(x, yy); else ctx.lineTo(x, yy); }
   ctx.stroke(); ctx.restore();
+}
+
+// Slower fixed steps retain jump arcs, terrain and strain abilities.
+// Normal mode never uses this path.
+function studyPace(difficulty) { return 0.55 + 0.45 * difficulty / 100; }
+function difficultyLabel(difficulty) {
+  return ({ 0: 'Study', 25: 'Relaxed', 50: 'Guided', 75: 'Gentle', 100: 'Normal' })[difficulty];
+}
+function syncDifficultyControl() {
+  if (!difficultySlider) return;
+  const value = G.difficulty, label = `${difficultyLabel(value)} · ${value}%`;
+  const description = value === 100 ? 'Original pace, hazards and records.'
+    : value === 0 ? '55% pace · no damage or deadline · pausing biology notes.'
+    : `${Math.round(studyPace(value) * 100)}% pace · more time and hit protection · pausing biology notes.`;
+  difficultySlider.value = value;
+  difficultySlider.setAttribute('aria-valuetext', label);
+  document.getElementById('difficulty-value').textContent = label;
+  document.getElementById('difficulty-help').textContent = description;
+}
+function openStudyNote(key, returnState = 'play') {
+  G.studyKey = key; G.studyReturn = returnState;
+  G.studySeen[key] = true;
+  for (const k in keys) keys[k] = false;
+  setState('study');
+}
+function reviewStudyNotes(returnState) {
+  const notes = Object.keys(G.studySeen);
+  if (!notes.length) notes.push('strain');
+  G.studyReview = notes; G.studyIndex = 0;
+  openStudyNote(notes[0], returnState);
+}
+function showNearbyStudy() {
+  const show = key => {
+    if (!key || G.studySeen[key]) return false;
+    G.studyReview = null;
+    openStudyNote(key);
+    return true;
+  };
+  if (show(L.def.name) || show('strain')) return true;
+  const px = P.x + P.w / 2, py = P.y + P.h / 2;
+  for (const e of L.ents) {
+    if (!e.alive) continue;
+    const x = e.cx ?? e.bx ?? e.x + 16, y = e.cy ?? (e.by ? e.by + e.jy - 35 : e.y + 16);
+    if (dist(px, py, x, y) < 150 && show(STUDY_ENTITY_NOTES[e.type])) return true;
+  }
+  const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+  for (let y = ty - 3; y <= ty + 2; y++) for (let x = tx - 3; x <= tx + 3; x++) {
+    const tile = tileAt(x, y);
+    const note = tile === 'R' ? 'ribosome' : tile === '^' ? 'foam'
+      : ['~', '<', '>'].includes(tile) ? 'airway' : null;
+    if (show(note)) return true;
+  }
+  return false;
+}
+function drawStudyNote() {
+  const note = STUDY_FACTS[G.studyKey];
+  ctx.fillStyle = 'rgba(8,20,28,0.72)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  roundRect(100, 60, 760, 424, 18, '#fbf8f1', '#75b6a1', 2);
+  text('STUDY NOTES · WORLD PAUSED', 132, 90, { size: 13, color: '#276a67', weight: '900' });
+  text(note.title, 132, 124, { size: 25, color: '#183b45', weight: '800' });
+  let y = 159;
+  text('THE BIOLOGY', 132, y, { size: 12, color: '#276a67', weight: '900' });
+  y += 25;
+  for (const line of wrap(note.biology, 690, 17)) {
+    text(line, 132, y, { size: 17, color: '#22343b', weight: '500' }); y += 23;
+  }
+  y += 13;
+  text('IN THIS GAME', 132, y, { size: 12, color: '#93620a', weight: '900' }); y += 24;
+  for (const line of wrap(note.game, 690, 16)) {
+    text(line, 132, y, { size: 16, color: '#514b3d', weight: '500' }); y += 22;
+  }
+  text(note.source, 132, 408, { size: 12, color: '#596b6d', weight: '500' });
+  text('References and links in README · B reopens discovered notes', 132, 426, { size: 12, color: '#596b6d', weight: '500' });
+  roundRect(310, 438, 340, 32, 10, '#276a67');
+  text('Enter / Space / tap to ' + (G.studyReview ? 'return' : 'continue'), VIEW_W / 2, 460, { size: 16, color: '#fff', align: 'center', weight: '800' });
+  if (G.studyReview) {
+    text(`←  ${G.studyIndex + 1} / ${G.studyReview.length}  →`, 806, 90, { size: 13, color: '#276a67', align: 'right', weight: '800' });
+    text('◀ Previous', 132, 460, { size: 14, color: '#276a67', weight: '800' });
+    text('Next ▶', 828, 460, { size: 14, color: '#276a67', align: 'right', weight: '800' });
+  }
 }

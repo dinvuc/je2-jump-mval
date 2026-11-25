@@ -68,6 +68,26 @@ browser storage. Your best run records a translucent personal ghost (G toggles i
 with at most 12,000 positions, approximately 20 minutes. Everything stays in your
 browser; storage failure never prevents play. Medal targets still need player tuning.
 
+**Study runs:** the main-menu difficulty slider starts at **Normal (100%)**, which
+keeps the original gameplay and records. Move it left to Gentle (75%), Guided
+(50%), Relaxed (25%) or Study (0%). Lower settings slow the whole world for more
+reaction time, lengthen protection after hits, make jump timing more forgiving,
+and extend the SNpulse game deadline. Jump arcs, routes and strain abilities stay
+the same. At 0%, hits and falls cost no replicates, the pulse has no deadline,
+and checkpoint retries have no time penalty. The real experiment's pulse was
+still 15 minutes; changing the slider only changes the game.
+
+Below 100%, new encounters open biology notes with the world and clock paused.
+The 21 topics cover exposure histories, phosphorylation, nutrient uptake,
+translation, proteomics, secreted products, oxidative defenses, airway biology
+and replication. Each card separates biology from the game's metaphor. Press
+Enter/Space or tap to continue; press B during play or choose **Review biology
+notes** when paused to revisit discovered notes. Use left/right or the on-screen
+Previous/Next controls to browse, then Enter or the center button to return.
+Times, ghosts and best scores are stored separately for each difficulty, so
+study runs cannot replace Normal records. The slider also supports native
+keyboard controls; Enter starts the selected run after adjusting it.
+
 **Checkpoint retry (R):** restore the world, inventory and replicates saved at the
 last cryo-vial, or the starting position. Time continues and adds a 3 s penalty.
 Retried runs cannot earn the keep-all-replicates star. An expired SNpulse deadline
@@ -186,6 +206,24 @@ music falls under the same MIT license as the code.
   CF infection; biofilms and alginate reducing antibiotic efficacy); pyocyanin redox cycling producing superoxide and hydrogen
   peroxide; trypsin cutting after K/R in bottom-up proteomics.
 
+### Study-note references
+
+Checked on 2026-11-25. These describe general biology, not causal evidence for
+the course dataset. Course-specific medium definitions, strains and replication
+come from the course context listed above; translation and peptide digestion
+are standard molecular-biology and proteomics background.
+
+- [Stk1 kinase and Stp1 phosphatase characterization (2009)](https://pmc.ncbi.nlm.nih.gov/articles/PMC2698471/).
+- [TcyABC/TcyP nutrient sulfur acquisition (Lensmire et al., 2020)](https://journals.asm.org/doi/10.1128/iai.00690-19).
+- [Secreted antimicrobial products and their combined effects (Gdaniec et al., 2020)](https://pmc.ncbi.nlm.nih.gov/articles/PMC7496599/): pyocyanin/ROS, respiratory inhibitors, proteases, siderophores and rhamnolipids.
+- [KatA/AhpC peroxide defenses (Cosgrove et al., 2007)](https://pmc.ncbi.nlm.nih.gov/articles/PMC1797328/).
+- [Staphyloxanthin antioxidant activity (Liu et al., 2005)](https://pmc.ncbi.nlm.nih.gov/articles/PMC2213009/).
+- [HQNO and small-colony variants (Hoffman et al., 2006)](https://pubmed.ncbi.nlm.nih.gov/17172450/).
+- [Membrane vesicles and bacterial cell-wall damage (Li et al., 1998)](https://pmc.ncbi.nlm.nih.gov/articles/PMC107602/).
+- [S. aureus PSM effects on human neutrophils (Forsman et al., 2012)](https://pubmed.ncbi.nlm.nih.gov/22431645/).
+- [Alginate overproduction and biofilm structure (2001)](https://pmc.ncbi.nlm.nih.gov/articles/PMC95424/).
+- [CFTR, mucus and cilia: Cystic Fibrosis Foundation](https://www.cff.org/managing-cf/basics-lung-care).
+
 ## Files
 
 index.html and style.css provide the page and canvas. js/facts.js contains strain
@@ -215,6 +253,8 @@ moving surfaces and crumbling platforms unavailable, and checks entry and return
 routes for the peptide detours. This proves a permanent main terrain route;
 it does not certify hazard balance, reaction time or visual layout
 in a browser. tests/harness.cjs supplies a mock Canvas environment.
+Study checks also cover the slider, paused note transitions, easier timing and
+damage rules, unchanged terrain, and separation of Normal/study records.
 
 ## License
 

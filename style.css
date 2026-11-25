@@ -22,6 +22,20 @@ h1 span { color: #f5ca65; }
 .screen-button:hover { background: #24535a; }
 .screen-button:focus-visible { outline: 3px solid #f5ca65; outline-offset: 3px; }
 #stage { position: relative; width: min(100%, calc(176.47dvh - 300px)); margin: 0 auto; border: 1px solid #719d9c80; border-radius: 13px; overflow: hidden; box-shadow: 0 18px 70px #0006, 0 0 35px #60ffd60a; }
+#game-view { position: relative; width: 100%; container-type: inline-size; }
+.run-settings {
+  position: absolute; top: 25.7353%; left: 9.375%; width: 81.25%;
+  padding: 0.5cqw 1.2cqw; border: 1px solid #37656c55; border-radius: 1cqw;
+  background: #ffffffe0; color: #173d46; font-size: 1.35cqw; line-height: 1.2;
+}
+.run-settings[hidden] { display: none; }
+.setting-heading { display: flex; justify-content: space-between; font-weight: 800; }
+.difficulty-track { display: flex; align-items: center; gap: 1cqw; }
+.difficulty-track span { min-width: 5cqw; font-size: 1.25cqw; font-weight: 700; }
+.difficulty-track span:last-child { text-align: right; }
+#difficulty { width: 100%; min-width: 0; height: 2.4cqw; margin: 0; accent-color: #276a67; cursor: pointer; }
+#difficulty:focus-visible { outline: 2px solid #0072b2; outline-offset: 2px; border-radius: 8px; }
+#difficulty-help { margin: 0; font-size: 1.2cqw; }
 canvas {
   display: block;
   width: 100%;
@@ -63,6 +77,7 @@ kbd {
 #touch .pause { position: absolute; top: 23%; right: 8px; width: 38px; height: 32px; border-radius: 8px; font-size: 18px; background: #142c3ed9; }
 #touch button[hidden] { display: none; }
 #stage:fullscreen { width: 100vw; height: 100dvh; display: grid; place-items: center; border: 0; border-radius: 0; background: #08131b; }
+#stage:fullscreen #game-view { width: min(100vw, 176.47dvh); }
 #stage:fullscreen canvas { width: min(100vw, 176.47dvh); height: auto; max-height: 100dvh; }
 @media (max-width: 700px) {
   main { padding: 10px 8px; }

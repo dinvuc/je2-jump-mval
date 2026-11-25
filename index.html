@@ -14,7 +14,13 @@
       <button id="fullscreen" class="screen-button" type="button">Full screen</button>
     </header>
     <div id="stage">
+      <div id="game-view">
       <canvas id="game" width="960" height="544" aria-label="JE2 Jump game"></canvas>
+      <section id="run-settings" class="run-settings" aria-label="Run settings">
+        <div class="setting-heading"><label for="difficulty">Run difficulty</label><output id="difficulty-value" for="difficulty">Normal · 100%</output></div>
+        <div class="difficulty-track"><span>Study</span><input id="difficulty" type="range" min="0" max="100" step="25" value="100" aria-describedby="difficulty-help"><span>Normal</span></div>
+        <p id="difficulty-help">Original pace, hazards and records.</p>
+      </section>
       <div id="touch" hidden>
         <button data-key="pause" class="pause" aria-label="pause or resume">Ⅱ</button>
         <button data-key="left" aria-label="left">◀</button>
@@ -23,6 +29,7 @@
         <button data-key="dash" class="dash" aria-label="ground dash" hidden>Dash</button>
         <button data-key="shoot" class="shoot" aria-label="shoot">✦</button>
         <button data-key="jump" aria-label="jump">⤒</button>
+      </div>
       </div>
     </div>
     <p class="help">

@@ -23,6 +23,8 @@ const ENEMIES = new Set(['lasa', 'omv', 'lasb', 'pa', 'twitch', 'sidero', 'rosb'
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
+const runSettings = document.getElementById('run-settings');
+const difficultySlider = document.getElementById('difficulty');
 configureCanvas();
 function resizeGame() {
   if (configureCanvas() && L) L.art = buildLevelArt(L, L.def.theme, G.levelIdx);
@@ -40,11 +42,13 @@ const KEYMAP = {
   KeyP: ['pause'], Escape: ['pause'], Digit1: ['s1'], Digit2: ['s2'], Digit3: ['s3'],
   KeyM: ['mute'], KeyN: ['music'], KeyX: ['shoot'], KeyK: ['shoot'], ShiftLeft: ['shoot'], ShiftRight: ['shoot'],
   KeyC: ['dash'], KeyR: ['retry'], KeyG: ['ghost'],
+  KeyB: ['biology'],
 };
 function press(k) { if (!keys[k]) pressed[k] = true; keys[k] = true; }
 function release(k) { keys[k] = false; }
 addEventListener('keydown', e => {
   AUDIO.unlock();
+  if (e.target === difficultySlider && e.code !== 'Enter') return; // Keep native range keys; Enter can still start.
   const ks = KEYMAP[e.code];
   if (!ks) return;
   e.preventDefault();
@@ -257,6 +261,10 @@ canvas.addEventListener('pointerdown', e => {
     if (i >= 0) { G.menuIdx = i; menuSelect(); }
   } else if (G.state === 'gameOver' && y > 420 && y < 480) {
     pressed.retry = true;
+  } else if (G.state === 'study' && G.studyReview && y > 435 && x < 260) {
+    pressed.left = true;
+  } else if (G.state === 'study' && G.studyReview && y > 435 && x > 700) {
+    pressed.right = true;
   } else if (G.state !== 'play') {
     pressed.ok = true;
   }
@@ -266,8 +274,9 @@ canvas.addEventListener('pointerdown', e => {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
-function loadBest() { try { return Number(localStorage.getItem('je2jump_v3_best')) || 0; } catch { return 0; } }
-function saveBest(v) { try { localStorage.setItem('je2jump_v3_best', String(v)); } catch { /* private mode */ } }
+function bestScoreKey() { return 'je2jump_v3_best' + (G.difficulty < 100 ? `_study_${G.difficulty}` : ''); }
+function loadBest(key = 'je2jump_v3_best') { try { return Number(localStorage.getItem(key)) || 0; } catch { return 0; } }
+function saveBest(v) { try { localStorage.setItem(bestScoreKey(), String(v)); } catch { /* private mode */ } }
 // Best times per level (seconds), kept in this browser only.
 function loadTimes() {
   try {
@@ -302,23 +311,38 @@ function mix(h1, h2, t) {
 }
 
 // ---- game state ------------------------------------------------------------------
-const G = { state: 'title', strain: 'anc', levelIdx: 0, startLevel: 0, score: 0, results: [], toast: '', toastT: 0, best: loadBest(), seen: {}, shake: 0, menuIdx: 0 };
+const G = { state: 'title', difficulty: 100, studySeen: {}, studyTick: 0, strain: 'anc', levelIdx: 0, startLevel: 0, score: 0, results: [], toast: '', toastT: 0, best: loadBest(), seen: {}, shake: 0, menuIdx: 0 };
 G.ghostOn = true;
 let L = null;  // the running level
 let P = null;  // the player
 
+if (difficultySlider) {
+  difficultySlider.addEventListener('input', () => {
+    if (G.state !== 'title') return;
+    G.difficulty = Number(difficultySlider.value);
+    G.best = loadBest(bestScoreKey());
+    syncDifficultyControl();
+  });
+  difficultySlider.addEventListener('focus', () => {
+    for (const k in keys) keys[k] = false;
+    clearPressed();
+  });
+}
+syncDifficultyControl();
+
 function setState(s) {
   G.state = s; clearPressed();
+  if (runSettings) runSettings.hidden = s !== 'title';
   touchBox.hidden = !matchMedia('(pointer: coarse)').matches || (s !== 'play' && s !== 'paused');
   AUDIO.music(s === 'title' ? 'title' : !L ? 'title' : L.bossActive && !L.bossDown ? 'boss' : L.def.name);
-  AUDIO.duck(s === 'paused');
+  AUDIO.duck(s === 'paused' || s === 'study');
   if (s !== 'play' && s !== 'paused') { AUDIO.muffle(false); AUDIO.intensity(0); }
   if (s === 'title') G.iris = 45;
 }
 
 // Start at the level picked on the title screen; later levels follow in order.
 function startGame() {
-  G.levelIdx = G.startLevel; G.score = 0; G.results = []; G.seen = {};
+  G.levelIdx = G.startLevel; G.score = 0; G.results = []; G.seen = {}; G.studySeen = {}; G.newBest = false;
   loadLevel(G.levelIdx);
   setState('intro');
 }
@@ -333,6 +357,8 @@ function loadLevel(i) {
     fx: [], pops: [], movers: [], shots: [], lysis: new Map(), solids: [], plats: [],
     combo: 0, comboT: 0, kills: 0, peptides: 0, spawnQ: [],
     retries: 0,
+    difficulty: G.difficulty,
+    timeLimit: def.timeLimit && G.difficulty > 0 ? Math.round(def.timeLimit * (1 + 2 * (1 - G.difficulty / 100))) : 0,
     recording: [], ghostIndex: 0,
     bossActive: false, bossDown: false, bg: b.bg, caveK: 0, jiggle: new Map(), goalSeen: {},
     abNext: 60 * (35 + Math.random() * 15), abWarn: 0, abOn: 0, abExpose: 0, covered: true,
@@ -352,7 +378,7 @@ function loadLevel(i) {
     ammo: 0, gold: 0, shootCool: 0, sticky: 0, belt: 0, sprung: false,
     glide: 60, dash: 0, dashCool: 0, shootFlash: 0,
   };
-  G.toast = ''; G.toastT = 0; G.failReason = ''; G.shake = 0; G.iris = 45; G.hitStop = 0;
+  G.toast = ''; G.toastT = 0; G.failReason = ''; G.shake = 0; G.iris = 45; G.hitStop = 0; G.studyTick = 0;
   for (const g of def.goals) L.goalSeen[g.id] = g.id === 'reps' || g.id === 'time';
   L.solids = [];
   L.ghost = loadGhost();
@@ -721,7 +747,8 @@ function goalStatus(g) {
     case 'reps': return { done: P.reps === 3 && L.retries === 0, text: g.label };
     case 'kills': return { done: L.kills >= g.n, text: `${g.label} (${Math.min(L.kills, g.n)}/${g.n})` };
     case 'boss': return { done: L.bossDown, text: g.label };
-    default: return { done: true, text: g.label };   // 'time': the pulse clock checks it
+    case 'time': return { done: true, text: L.difficulty === 0 ? 'Reach the MS (study: no deadline)' : g.label };
+    default: return { done: true, text: g.label };
   }
 }
 const missingGoals = () => L.def.goals.filter(g => g.req && !goalStatus(g).done);
@@ -802,12 +829,17 @@ function gain(base, x, y, color) {
 
 // ---- damage ----------------------------------------------------------------------
 function loseReplicate(msg) {
+  if (L.difficulty === 0) { toast('Study run: replicates protected. ' + msg); return; }
   P.reps--; P.repFlash = 50;
   toast(P.reps > 0 ? `${msg}  Replicates left: ${P.reps}/3` : msg);
   if (P.reps <= 0) { setState('gameOver'); AUDIO.play('fail'); }
 }
 function hurt(kind, msg) {
   if (P.inv > 0) return;
+  if (L.difficulty === 0) {
+    P.inv = 180; P.damageT = 75; P.damageLabel = 'STUDY · PROTECTED';
+    return;
+  }
   if (kind === 'ros' && P.gold > 0) {   // staphyloxanthin: an antioxidant pigment
     burst(P.x + P.w / 2, P.y + P.h / 2, '#ffd84a', 8, 2.4);
     L.points += 20;
@@ -820,7 +852,7 @@ function hurt(kind, msg) {
     toast('AhpC absorbed the ROS. Shield used up.');
     return;
   }
-  P.inv = 90; P.vy = -6; P.vx = -P.face * 3; P.dizzy = 80; P.damageT = 75;
+  P.inv = 90 + Math.round(180 * (1 - L.difficulty / 100)); P.vy = -6; P.vx = -P.face * 3; P.dizzy = 80; P.damageT = 75;
   P.damageLabel = ({ ros: 'ROS HIT', hcn: 'HCN HIT', foam: 'MEMBRANE HIT', enemy: 'CELL WALL HIT' })[kind] || 'REPLICATE LOST';
   burst(P.x + P.w / 2, P.y + P.h / 2, '#e0465a', 12, 3);
   G.shake = 10; AUDIO.play('hurt');
@@ -840,7 +872,7 @@ function updatePlay() {
   if (P.shootFlash > 0) P.shootFlash--;
   if (took('dash')) startDash();
 
-  if (L.def.timeLimit && L.time / 60 > L.def.timeLimit) {
+  if (L.timeLimit && L.time / 60 > L.timeLimit) {
     toast('The 15-min pulse ended before your sample reached the MS.');
     setState('gameOver');
     AUDIO.play('fail');
@@ -873,9 +905,9 @@ function updatePlay() {
   if (Math.abs(P.vx) < 0.05) P.vx = 0;
 
   // Jump, with coyote time and a small input buffer so it feels fair.
-  if (took('jump')) P.buffer = BUFFER; else if (P.buffer > 0) P.buffer--;
+  if (took('jump')) P.buffer = BUFFER + Math.round(6 * (1 - L.difficulty / 100)); else if (P.buffer > 0) P.buffer--;
   if (P.onGround) {
-    P.coyote = COYOTE; P.groundT++; P.glide = 60;
+    P.coyote = COYOTE + Math.round(12 * (1 - L.difficulty / 100)); P.groundT++; P.glide = 60;
     if (S.doubleJump > 0 && P.groundT >= S.recharge) P.djReady = true;
   } else { P.coyote--; P.groundT = 0; }
 
@@ -1236,7 +1268,7 @@ function updateEntities() {
 }
 
 function finishLevel() {
-  const timeBonus = L.def.timeLimit ? Math.max(0, Math.round((L.def.timeLimit - L.time / 60) * 20)) : 0;
+  const timeBonus = L.timeLimit ? Math.max(0, Math.round((L.timeLimit - L.time / 60) * 20)) : 0;
   const repBonus = P.reps * 500;
   const total = L.points + timeBonus + repBonus;
   // Stars: one for finishing, one for each bonus goal of the level.
@@ -1256,9 +1288,11 @@ function finishLevel() {
 
 // ---- pause menu ------------------------------------------------------------------
 function menuItems() {
-  return ['Resume', 'Retry checkpoint (+3 s)', 'Restart level', `Sound effects: ${AUDIO.sfxOn ? 'on' : 'off'}`, `Music: ${AUDIO.musicOn ? 'on' : 'off'}`, 'Main menu'];
+  const items = ['Resume', L.difficulty === 0 ? 'Retry checkpoint (free)' : 'Retry checkpoint (+3 s)', 'Restart level', `Sound effects: ${AUDIO.sfxOn ? 'on' : 'off'}`, `Music: ${AUDIO.musicOn ? 'on' : 'off'}`, 'Main menu'];
+  if (L.difficulty < 100) items.push('Review biology notes (B)');
+  return items;
 }
-function menuRects() { return menuItems().map((_, i) => ({ x: VIEW_W / 2 - 170, y: 158 + i * 46, w: 340, h: 40 })); }
+function menuRects() { return menuItems().map((_, i) => ({ x: VIEW_W / 2 - 170, y: (L.difficulty < 100 ? 154 : 158) + i * (L.difficulty < 100 ? 40 : 46), w: 340, h: L.difficulty < 100 ? 36 : 40 })); }
 function menuSelect() {
   AUDIO.play('click');
   switch (G.menuIdx) {
@@ -1268,6 +1302,7 @@ function menuSelect() {
     case 3: AUDIO.toggleSfx(); break;
     case 4: AUDIO.toggleMusic(); break;
     case 5: G.startLevel = G.levelIdx; setState('title'); break;
+    case 6: reviewStudyNotes('paused'); break;
   }
 }
 
@@ -1295,12 +1330,33 @@ function update() {
       break;
     case 'play':
       if (took('pause')) { G.menuIdx = 0; setState('paused'); AUDIO.play('click'); break; }
+      if (L.difficulty < 100 && took('biology')) { reviewStudyNotes('play'); break; }
       if (G.hitStop > 0) { G.hitStop--; break; }   // a tiny freeze on big hits
+      if (L.difficulty < 100) {
+        if (showNearbyStudy()) break;
+        G.studyTick += studyPace(L.difficulty);
+        if (G.studyTick < 1) break;
+        G.studyTick -= 1;
+      }
       updatePlay();
+      break;
+    case 'study':
+      if (G.studyReview) {
+        if (took('left')) G.studyIndex = (G.studyIndex + G.studyReview.length - 1) % G.studyReview.length;
+        if (took('right')) G.studyIndex = (G.studyIndex + 1) % G.studyReview.length;
+        G.studyKey = G.studyReview[G.studyIndex];
+      }
+      if (took('confirm') || took('ok') || took('jump') || took('pause')) {
+        const next = G.studyReturn;
+        G.studyReview = null;
+        for (const k in keys) keys[k] = false;
+        setState(next);
+      }
       break;
     case 'paused': {
       const n = menuItems().length;
       if (took('pause')) { setState('play'); break; }
+      if (L.difficulty < 100 && took('biology')) { reviewStudyNotes('paused'); break; }
       if (took('up')) { G.menuIdx = (G.menuIdx + n - 1) % n; AUDIO.play('move'); }
       if (took('down')) { G.menuIdx = (G.menuIdx + 1) % n; AUDIO.play('move'); }
       if (took('confirm')) menuSelect();
@@ -2421,9 +2477,9 @@ function drawHUD() {
   if (P.slow > 0) chip('HQNO', '#4f7f2a');
   if (P.ammo > 0) chip(`PSM ${P.ammo}`, '#b0408f');
   if (P.gold > 0) chip(`xanthin ${Math.ceil(P.gold / 60)}`, '#c99512');
-  if (L.def.timeLimit) {
+  if (L.timeLimit) {
     // Game seconds left, scaled so the whole limit shows as 15 pulse minutes.
-    const left = Math.max(0, L.def.timeLimit - L.time / 60) * PULSE_S / L.def.timeLimit;
+    const left = Math.max(0, L.timeLimit - L.time / 60) * PULSE_S / L.timeLimit;
     const mm = Math.floor(left / 60), ss = Math.floor(left % 60), urgent = left < 120;
     roundRect(VIEW_W - 152, 14, 132, 28, 14, urgent ? '#b3261e' : 'rgba(255,255,255,0.12)');
     ctx.strokeStyle = urgent ? '#fff' : '#7fc4ff'; ctx.lineWidth = 3;
@@ -2507,7 +2563,7 @@ function drawGoalList() {
   gs.forEach(({ g, s }, i) => text(`${s.done ? '☑' : '☐'} ${s.text}${g.req ? '' : '  ★'}`, 20, y0 + 21 + i * 20, { size: 13, color: s.done ? '#9be89f' : '#f4f1ea', weight: '700' }));
 }
 function goalLines(def) {
-  return def.goals.map(g => `${g.req ? '•' : '★'} ${g.label}${g.req ? '' : ' (bonus star)'}`);
+  return def.goals.map(g => `${g.req ? '•' : '★'} ${g.id === 'time' ? goalStatus(g).text : g.label}${g.req ? '' : ' (bonus star)'}`);
 }
 
 function drawStars(stars, labels, y) {
@@ -2530,14 +2586,14 @@ function drawPauseMenu() {
   menuRects().forEach((r, i) => {
     const sel = i === G.menuIdx, label = menuItems()[i];
     roundRect(r.x, r.y, r.w, r.h, 12, sel ? '#2b5d8a' : 'rgba(43,93,138,0.08)', sel ? null : 'rgba(43,93,138,0.25)', 1.5);
-    text(label, r.x + r.w / 2, r.y + 29, { size: 18, color: sel ? '#fff' : '#22303c', align: 'center', weight: sel ? '800' : '600' });
-    if (sel) text('▶', r.x + 18, r.y + 29, { size: 14, color: '#fff', weight: '900' });
+    text(label, r.x + r.w / 2, r.y + (L.difficulty < 100 ? 25 : 29), { size: 18, color: sel ? '#fff' : '#22303c', align: 'center', weight: sel ? '800' : '600' });
+    if (sel) text('▶', r.x + 18, r.y + (L.difficulty < 100 ? 25 : 29), { size: 14, color: '#fff', weight: '900' });
   });
   text('↑ ↓ choose · Enter / Space select · P resume', VIEW_W / 2, 466, { size: 13, color: '#6b6455', align: 'center' });
 }
 
 function strainCards() {
-  return ['anc', 'stk', 'stp'].map((key, i) => ({ key, x: 90 + i * 270, y: 212, w: 240, h: 170 }));
+  return ['anc', 'stk', 'stp'].map((key, i) => ({ key, x: 90 + i * 270, y: 228, w: 240, h: 154 }));
 }
 function levelChips() {
   return LEVELS.map((d, i) => ({ i, x: 180 + i * 190, y: 396, w: 180, h: 36 }));
@@ -2575,8 +2631,7 @@ function drawTitle() {
   drawCoccus(VIEW_W / 2 - 200, 70 + Math.sin(t * 3) * 6, 16, '#0072B2', { face: 1 });
   drawCoccus(VIEW_W / 2 + 200, 70 + Math.sin(t * 3 + 1.5) * 6, 16, '#009E73', { face: -1 });
   text('SMALL CELL. BIG REACTION.', VIEW_W / 2, 132, { size: 20, color: '#174953', align: 'center', weight: '900' });
-  text('Run, bounce and glide. Find your own way to the sample.', VIEW_W / 2, 168, { size: 17, color: '#2b2b2b', align: 'center', weight: '600' });
-  text('Choose your strain (1 / 2 / 3, ← →, or click a card to start):', VIEW_W / 2, 200, { size: 16, color: '#2b2b2b', align: 'center' });
+  text('Choose your strain (1 / 2 / 3, ← →, or click a card to start):', VIEW_W / 2, 216, { size: 16, color: '#2b2b2b', align: 'center' });
   for (const c of strainCards()) {
     const S = STRAINS[c.key], sel = G.strain === c.key, lift = sel ? -6 : 0;
     ctx.save();
@@ -2587,7 +2642,7 @@ function drawTitle() {
     drawCoccus(c.x + 40, c.y + 44 + lift + (sel ? Math.sin(t * 5) * 3 : 0), 18, S.colour, { face: 1 });
     text(S.label, c.x + 72, c.y + 42 + lift, { size: 26, color: S.colour, weight: '900' });
     text(S.title, c.x + 72, c.y + 62 + lift, { size: 13, color: '#555' });
-    S.lines.forEach((ln, i) => text(ln, c.x + 16, c.y + 104 + lift + i * 22, { size: 13, color: '#2b2b2b', weight: '500' }));
+    S.lines.forEach((ln, i) => text(ln, c.x + 16, c.y + 95 + lift + i * 20, { size: 13, color: '#2b2b2b', weight: '500' }));
   }
   // level picker: the game starts at the chosen level
   text('Level (↑ ↓):', 170, 419, { size: 14, color: '#2b2b2b', align: 'right', weight: '700' });
@@ -2660,7 +2715,10 @@ function draw() {
   const S = STRAINS[G.strain];
   switch (G.state) {
     case 'intro':
-      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), [`Medal times: gold ≤ ${fmtTime(medalTargets(L.def)[0])} · silver ≤ ${fmtTime(medalTargets(L.def)[1])} · bronze ≤ ${fmtTime(medalTargets(L.def)[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
+      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), [L.difficulty < 100 ? `Study ${L.difficulty}% · ${Math.round(studyPace(L.difficulty) * 100)}% pace · biology notes pause the world` : `Medal times: gold ≤ ${fmtTime(medalTargets(L.def)[0])} · silver ≤ ${fmtTime(medalTargets(L.def)[1])} · bronze ≤ ${fmtTime(medalTargets(L.def)[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
+      break;
+    case 'study':
+      drawStudyNote();
       break;
     case 'paused':
       drawPauseMenu();

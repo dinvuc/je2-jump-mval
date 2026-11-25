@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { run, reset, storage, events, mainCanvas, setDisplayWidth } = require('./harness.cjs');
+const { run, reset, storage, events, mainCanvas, setDisplayWidth, controls } = require('./harness.cjs');
 let checks = 0;
 function check(label, fn) { fn(); console.log('ok ' + (++checks) + ' - ' + label); }
 check('high-density canvas preserves logical coordinates', () => {
@@ -95,6 +95,82 @@ check('resizing and scaled pointer input preserve game and menu coordinates', ()
   assert.equal(run('G.strain'),'stp'); assert.equal(run('G.state'),'intro');
 });
 require('./routes.cjs')({run,reset,check});
+check('menu slider defaults to normal and keeps native keyboard input separate', () => {
+  reset(); run("setState('title'); G.strain='anc'; syncDifficultyControl();");
+  assert.equal(Number(controls.difficulty.value), 100);
+  assert.equal(controls['run-settings'].hidden, false);
+  events.keydown({ code: 'ArrowLeft', target: controls.difficulty, preventDefault() { throw new Error('native range key intercepted'); } });
+  run('update();'); assert.equal(run('G.strain'), 'anc');
+  controls.difficulty.value = '50'; controls.difficulty.handlers.input();
+  assert.equal(run('G.difficulty'), 50);
+  assert.equal(controls.difficulty.attributes['aria-valuetext'], 'Guided · 50%');
+  events.keydown({ code: 'Enter', target: controls.difficulty, preventDefault() {} });
+  run('update();'); assert.equal(run('L.difficulty'), 50);
+  assert.equal(controls['run-settings'].hidden, true);
+  run("setState('title');"); assert.equal(controls['run-settings'].hidden, false);
+});
+check('lower difficulty slows the world while normal mode keeps the original cadence', () => {
+  for (const difficulty of [0,25,50,75,100]) {
+    reset(0,'anc',difficulty);
+    run('G.studySeen=Object.fromEntries(Object.keys(STUDY_FACTS).map(k=>[k,true])); for(let i=0;i<60;i++) update();');
+    const expected = Math.floor((0.55 + 0.45 * difficulty / 100) * 60 + 1e-8);
+    assert(Math.abs(run('L.time') - expected) <= 1);
+    assert.equal(run('G.state'),'play');
+  }
+});
+check('study notes freeze timers, open once per topic and can be reviewed by key or touch', () => {
+  reset(1,'stk',50); run('update();');
+  assert.equal(run('G.state'),'study'); assert.equal(run('G.studyKey'),'SNpulse');
+  run('for(let i=0;i<120;i++) { update(); if(i%30===0) draw(); }'); assert.equal(run('L.time'),0);
+  mainCanvas.handlers.pointerdown({clientX:480/2,clientY:455/2}); run('update();');
+  assert.equal(run('G.state'),'play'); run('update();');
+  assert.equal(run('G.studyKey'),'strain');
+  run('pressed.confirm=true; update();');
+  assert.equal(run('G.state'),'play');
+  run('pressed.biology=true; update();'); assert.equal(run('G.state'),'study');
+  assert.equal(run('G.studyReview.length'),2);
+  mainCanvas.handlers.pointerdown({clientX:800/2,clientY:455/2}); run('update();');
+  assert.equal(run('G.studyKey'),'strain');
+  run('pressed.confirm=true; update();'); assert.equal(run('G.state'),'play');
+  run("setState('paused'); pressed.biology=true; update();"); assert.equal(run('G.state'),'study');
+  run('pressed.pause=true; update();'); assert.equal(run('G.state'),'paused');
+  reset(1); run('update();'); assert.equal(run('G.state'),'play');
+});
+check('study assistance protects replicates, extends the pulse and permits free retries at zero', () => {
+  reset(1,'anc',50); assert.equal(run('L.timeLimit'),290);
+  run("hurt('ros','test');"); assert.equal(run('P.reps'),2); assert.equal(run('P.inv'),180);
+  reset(1,'anc',0); run("hurt('ros','test'); loseReplicate('fall'); L.time=20000; updatePlay();");
+  assert.equal(run('P.reps'),3); assert.equal(run('L.timeLimit'),0); assert.equal(run('G.state'),'play');
+  run('retryCheckpoint();'); assert.equal(run('L.time'),20001);
+  assert.equal(run('G.state'),'play'); assert(run('Number.isFinite(exposureFrontY())'));
+  reset(1); run("hurt('ros','test');"); assert.equal(run('P.inv'),90);
+  assert.equal(run('L.timeLimit'),145);
+});
+check('study encounters cover all entity notes and terrain mechanisms without changing layouts', () => {
+  for (let level=0;level<4;level++) for (const strain of ['anc','stk','stp']) {
+    reset(level,strain); const terrain=run('JSON.stringify(L.grid)');
+    reset(level,strain,0); assert.equal(run('JSON.stringify(L.grid)'),terrain);
+    run('G.studySeen=Object.fromEntries(Object.keys(STUDY_FACTS).map(k=>[k,true])); for(let i=0;i<30;i++) update(); draw();');
+    assert.equal(run('G.state'),'play');
+  }
+  reset(2,'anc',50);
+  for (const [type,key] of Object.entries(run('STUDY_ENTITY_NOTES'))) {
+    run(`G.studySeen=Object.fromEntries(Object.keys(STUDY_FACTS).filter(k=>k!==${JSON.stringify(key)}).map(k=>[k,true])); L.ents=[{type:${JSON.stringify(type)},x:P.x,y:P.y,alive:true}]; setState('play'); update();`);
+    assert.equal(run('G.state'),'study'); assert.equal(run('G.studyKey'),key);
+  }
+  for (const key of run('Object.keys(STUDY_FACTS)')) run(`G.studyKey=${JSON.stringify(key)}; draw();`);
+});
+check('study records, ghosts and best scores never overwrite normal records', () => {
+  reset(); run('L.time=1200; L.recording=[[6,68,804,1],[1200,2700,548,1]]; finishLevel();');
+  const normalTime=run('loadTimes()[runKey()]'), normalGhost=storage.get('je2jump_ghost_3:TSB:anc');
+  storage.set('je2jump_v3_best','9000');
+  reset(0,'anc',0); run('L.time=600; L.recording=[[6,68,804,1],[600,2700,548,1]]; finishLevel(); saveBest(100);');
+  assert.equal(run('loadTimes()[runKey()]'),10);
+  assert.equal(storage.get('je2jump_v3_best'),'9000');
+  assert.equal(storage.get('je2jump_ghost_3:TSB:anc'),normalGhost);
+  reset(); assert.equal(run('loadTimes()[runKey()]'),normalTime);
+  assert.equal(run('loadGhost().samples[1][0]'),JSON.parse(normalGhost).samples[1][0]);
+});
 check('malformed storage and a full quota never prevent playing', () => {
   storage.set('je2jump_v3_times','"bad"'); assert.equal(run('Object.keys(loadTimes()).length'),0);
   reset(); storage.set('je2jump_ghost_3:TSB:anc','{"v":3,"samples":[[null,0,0,1]]}');
