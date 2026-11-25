@@ -1003,6 +1003,7 @@ function updatePlay() {
   updateLabels();
   updateFlyers();
   updateGaze();
+  updateSigns();
   if (P.scared && nearFoamTile()) meet('foam');
   updateLook();
   followCamera();
@@ -2185,41 +2186,57 @@ function drawLysis(cx, cy) {
   });
 }
 
-// Info signs are membrane vesicles with an "i" inside. Only the nearest one talks.
+// Info signs are membrane vesicles with an "i" inside. A sign only talks after you
+// stand on it for about a second (a ring fills around the icon meanwhile); the
+// message is a small translucent panel that fades in and out.
+const SIGN_HOLD = 60;
 function nearestSign() {
   let best = null, bd = Infinity;
   for (const s of L.signs) {
     const dx = Math.abs(s.tx * TILE + 16 - (P.x + P.w / 2)), dy = Math.abs(s.ty * TILE + 16 - (P.y + P.h / 2));
-    if (dx < TILE * 1.5 && dy < TILE * 1.5 && dx + dy < bd) { bd = dx + dy; best = s; }   // only when really close
+    if (dx < TILE * 0.9 && dy < TILE * 1.2 && dx + dy < bd) { bd = dx + dy; best = s; }   // standing on the icon
   }
   return best;
 }
+function updateSigns() {
+  const s = P.onGround ? nearestSign() : null;
+  if (s && s === L.signAt) L.signT = Math.min(SIGN_HOLD, (L.signT || 0) + 1);
+  else { L.signAt = s; L.signT = s ? 1 : 0; }
+  if (L.signT >= SIGN_HOLD) L.signShown = s;
+  L.signA = clamp((L.signA || 0) + (L.signT >= SIGN_HOLD ? 0.09 : -0.12), 0, 1);
+}
 function drawSigns(cx, cy) {
-  const near = nearestSign();
   for (const s of L.signs) {
     const x = s.tx * TILE + 16, y = s.ty * TILE + 12 + Math.sin(L.time * 0.05 + s.tx) * 3;
     if (x < cx - 40 || x > cx + VIEW_W + 40 || y < cy - 40 || y > cy + VIEW_H + 40) continue;
-    if (s === near) glow(x, y, 30, '#ffffff', 0.45);
-    ctx.globalAlpha = s === near ? 0.9 : 0.6;
+    const near = s === L.signAt, k = near ? (L.signT || 0) / SIGN_HOLD : 0;
+    if (near) glow(x, y, 26 + 6 * k, '#ffffff', 0.25 + 0.25 * k);
+    ctx.globalAlpha = near ? 0.9 : 0.6;
     circle(x, y, 13, 'rgba(255,255,255,0.3)');
     ctx.strokeStyle = 'rgba(90,120,150,0.75)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, 13, 0, TAU); ctx.stroke();
     ctx.strokeStyle = 'rgba(90,120,150,0.4)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 9.5, 0, TAU); ctx.stroke();
     text('i', x, y + 5, { size: 15, color: '#2c4f70', align: 'center', weight: '900', font: 'Georgia, serif' });
+    if (near && k < 1) {   // the reading ring fills while you stand still on the sign
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(x, y, 17, -Math.PI / 2, -Math.PI / 2 + TAU * k); ctx.stroke();
+    }
     ctx.globalAlpha = 1;
   }
 }
 function drawSignText(cx, cy) {
-  const s = nearestSign();
-  if (!s) return;
+  const s = L.signShown, a = L.signA || 0;
+  if (!s || a <= 0.01) return;
   const x = s.tx * TILE + 16 - cx, y = s.ty * TILE + 12 - cy;
-  const lines = wrap(s.text, 300);
-  const h = lines.length * 18 + 16, w = 324;
+  const lines = wrap(s.text, 268, 13);
+  const h = lines.length * 17 + 14, w = 290;
   const bx = clamp(x - w / 2, 8, VIEW_W - w - 8);
-  let by = y - 28 - h;
-  if (by < 58) by = y + 26;
-  roundRect(bx, by, w, h, 10, 'rgba(248,255,253,0.96)', 'rgba(42,79,94,0.6)', 1.5);
-  ctx.save(); ctx.shadowColor = 'rgba(255,255,255,0.9)'; ctx.shadowBlur = 3;   // keeps the text readable on the lighter box
-  lines.forEach((ln, i) => text(ln, bx + 12, by + 23 + i * 18, { size: 14, color: '#13212b' }));
+  let by = y - 30 - h + (1 - a) * 8;
+  if (by < 100) by = y + 28 - (1 - a) * 8;   // keep clear of the HUD bar
+  ctx.save();
+  ctx.globalAlpha = a;
+  roundRect(bx, by, w, h, 10, 'rgba(12,26,34,0.55)', 'rgba(255,255,255,0.28)', 1);
+  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 3;   // readable on the translucent panel
+  lines.forEach((ln, i) => text(ln, bx + 12, by + 21 + i * 17, { size: 13, color: '#f2f8f6', weight: '600' }));
   ctx.restore();
 }
 
@@ -2966,15 +2983,43 @@ function drawPauseMenu() {
   text('↑ ↓ choose · Enter / Space select · P resume', VIEW_W / 2, 466, { size: 13, color: '#6b6455', align: 'center' });
 }
 
+// Title layout, top to bottom: logo, difficulty buttons (HTML, see style.css),
+// strain cards, then two panels of equal width: STORY (2 x 2 levels) and
+// MORE WAYS TO PLAY (daily, log phase, codex). Everything lines up with the cards.
+const TITLE = { left: 90, right: 870, cardsY: 192, cardsH: 128, panelY: 334, panelH: 106, gap: 30 };
+// Centred chip text that shrinks until it fits its chip.
+function chipText(str, c, color) {
+  let size = 13;
+  for (; size > 9.5; size -= 0.5) { ctx.font = `800 ${size}px ${FONT}`; if (ctx.measureText(str).width <= c.w - 18) break; }
+  text(str, c.x + c.w / 2, c.y + 20, { size, color, align: "center", weight: "800" });
+}
 function strainCards() {
-  return ['anc', 'stk', 'stp'].map((key, i) => ({ key, x: 90 + i * 270, y: 222, w: 240, h: 138 }));
+  return ['anc', 'stk', 'stp'].map((key, i) => ({ key, x: TITLE.left + i * 270, y: TITLE.cardsY, w: 240, h: TITLE.cardsH }));
+}
+function titlePanels() {
+  const w = (TITLE.right - TITLE.left - TITLE.gap) / 2;
+  return [
+    { title: 'STORY  ·  ↑ ↓ to pick', x: TITLE.left, y: TITLE.panelY, w, h: TITLE.panelH },
+    { title: 'MORE WAYS TO PLAY', x: TITLE.left + w + TITLE.gap, y: TITLE.panelY, w, h: TITLE.panelH },
+  ];
+}
+// Chips sit inside the panels: 14 px padding, a 26 px header, two rows of 30 px.
+function panelGrid(p) {
+  const pad = 14, gap = 8, cw = (p.w - pad * 2 - gap) / 2, rows = [p.y + 30, p.y + 30 + 30 + gap];
+  return { pad, gap, cw, rows, full: p.w - pad * 2 };
 }
 function levelChips() {
-  return LEVELS.map((d, i) => ({ i, x: 180 + i * 190, y: 368, w: 180, h: 32 }));
+  const p = titlePanels()[0], g = panelGrid(p);
+  return LEVELS.map((d, i) => ({ i, x: p.x + g.pad + (i % 2) * (g.cw + g.gap), y: g.rows[Math.floor(i / 2)], w: g.cw, h: 30 }));
 }
 // slot 4 = daily challenge, 5 = log phase, codex = the collection book
 function modeChips() {
-  return [{ slot: 4, x: 180, y: 408, w: 370, h: 32 }, { slot: 5, x: 560, y: 408, w: 200, h: 32 }, { slot: 'codex', x: 770, y: 408, w: 170, h: 32 }];
+  const p = titlePanels()[1], g = panelGrid(p), x = p.x + g.pad;
+  return [
+    { slot: 4, x, y: g.rows[0], w: g.full, h: 30 },
+    { slot: 5, x, y: g.rows[1], w: g.cw, h: 30 },
+    { slot: 'codex', x: x + g.cw + g.gap, y: g.rows[1], w: g.cw, h: 30 },
+  ];
 }
 
 // Title background: drifting grape-like clusters of cocci.
@@ -2999,70 +3044,82 @@ function drawTitle() {
   g.addColorStop(0, '#fff3cf'); g.addColorStop(0.6, '#cfe3c9'); g.addColorStop(1, '#6fa9b0');
   ctx.fillStyle = g; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.drawImage(TITLE_BG, (t * 12) % VIEW_W, 0, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+  // logo
   ctx.save();
-  ctx.font = `900 60px ${FONT}`; ctx.textAlign = 'center';
-  ctx.lineJoin = 'round'; ctx.lineWidth = 10; ctx.strokeStyle = '#5a3d00'; ctx.strokeText('JE2 JUMP', VIEW_W / 2, 76);
-  const tg = ctx.createLinearGradient(0, 28, 0, 80);
+  ctx.font = `900 56px ${FONT}`; ctx.textAlign = 'center';
+  ctx.lineJoin = 'round'; ctx.lineWidth = 10; ctx.strokeStyle = '#5a3d00'; ctx.strokeText('JE2 JUMP', VIEW_W / 2, 70);
+  const tg = ctx.createLinearGradient(0, 26, 0, 74);
   tg.addColorStop(0, '#fff1a0'); tg.addColorStop(1, '#e0a210');
-  ctx.fillStyle = tg; ctx.fillText('JE2 JUMP', VIEW_W / 2, 76);
+  ctx.fillStyle = tg; ctx.fillText('JE2 JUMP', VIEW_W / 2, 70);
   ctx.restore();
-  drawCoccus(VIEW_W / 2 - 190, 56 + Math.sin(t * 3) * 6, 15, '#0072B2', { face: 1, mood: Math.sin(t * 0.7) > 0.6 ? 'happy' : '' });
-  drawCoccus(VIEW_W / 2 + 190, 56 + Math.sin(t * 3 + 1.5) * 6, 15, '#009E73', { face: -1, mood: Math.sin(t * 0.7 + 2) > 0.6 ? 'happy' : '' });
-  text('SMALL CELL. BIG REACTION.', VIEW_W / 2, 108, { size: 18, color: '#174953', align: 'center', weight: '900' });
-  if (G.rival) {   // a race link was opened
-    const r = G.rival, msg = `🏁 Rival ghost loaded: ${LEVELS[r.level].name} · ${r.strain} · ${fmtTime(r.secs)}. Press Enter to race it!`;
+  drawCoccus(VIEW_W / 2 - 178, 52 + Math.sin(t * 3) * 5, 14, '#0072B2', { face: 1, mood: Math.sin(t * 0.7) > 0.6 ? 'happy' : '' });
+  drawCoccus(VIEW_W / 2 + 178, 52 + Math.sin(t * 3 + 1.5) * 5, 14, '#009E73', { face: -1, mood: Math.sin(t * 0.7 + 2) > 0.6 ? 'happy' : '' });
+  if (G.rival) {   // a race link was opened: the banner replaces the tagline
+    const r = G.rival, msg = `🏁 Rival ghost: ${LEVELS[r.level].name} · ${r.strain} · ${fmtTime(r.secs)} · press Enter to race`;
     ctx.font = `800 13px ${FONT}`;
     const w = ctx.measureText(msg).width + 28;
-    roundRect(VIEW_W / 2 - w / 2, 120, w, 24, 12, '#b3261e');
-    text(msg, VIEW_W / 2, 137, { size: 13, color: '#fff', align: 'center', weight: '800' });
-  }
+    roundRect(VIEW_W / 2 - w / 2, 82, w, 24, 12, '#b3261e');
+    text(msg, VIEW_W / 2, 99, { size: 13, color: '#fff', align: 'center', weight: '800' });
+  } else text('SMALL CELL. BIG REACTION.', VIEW_W / 2, 100, { size: 16, color: '#174953', align: 'center', weight: '900' });
+  // (the Study / Normal / Hard buttons are HTML and sit at y 114-168)
+
+  // strains
   const daily = G.titleMode === 'daily' ? dailyChallenge(dayNumber()) : null;
-  text(daily ? `Today's strain is fixed: ${daily.strain}. Click a card or press Enter to start.` : 'Choose your strain (1 / 2 / 3, ← →, or click a card to start):', VIEW_W / 2, 212, { size: 15, color: '#2b2b2b', align: 'center' });
+  const label = (str, x, y, align = 'left') => text(str, x, y, { size: 11, color: 'rgba(23,61,70,0.75)', align, weight: '900' });
+  label('STRAIN', TITLE.left + 4, TITLE.cardsY - 8);
+  label(daily ? `today's strain is fixed: ${daily.strain}` : '1 / 2 / 3 or ← →  ·  click a card to start', TITLE.right - 4, TITLE.cardsY - 8, 'right');
   for (const c of strainCards()) {
-    const S = STRAINS[c.key], sel = G.strain === c.key, lift = sel ? -6 : 0, locked = daily && !sel;
+    const S = STRAINS[c.key], sel = G.strain === c.key, lift = sel ? -4 : 0, locked = daily && !sel;
     ctx.save();
     if (locked) ctx.globalAlpha = 0.45;
-    if (sel) { ctx.shadowColor = rgba(S.colour, 0.45); ctx.shadowBlur = 24; ctx.shadowOffsetY = 6; }
-    roundRect(c.x, c.y + lift, c.w, c.h, 16, sel ? '#ffffff' : 'rgba(255,255,255,0.62)');
+    if (sel) { ctx.shadowColor = rgba(S.colour, 0.45); ctx.shadowBlur = 22; ctx.shadowOffsetY = 5; }
+    roundRect(c.x, c.y + lift, c.w, c.h, 14, sel ? '#ffffff' : 'rgba(255,255,255,0.62)');
     ctx.restore();
     ctx.save();
     if (locked) ctx.globalAlpha = 0.45;
-    roundRect(c.x, c.y + lift, c.w, c.h, 16, null, sel ? S.colour : 'rgba(0,0,0,0.12)', sel ? 4 : 1.5);
-    drawCoccus(c.x + 40, c.y + 42 + lift + (sel ? Math.sin(t * 5) * 3 : 0), 18, S.colour, { face: 1, mood: sel ? 'happy' : '' });
-    text(S.label, c.x + 72, c.y + 40 + lift, { size: 26, color: S.colour, weight: '900' });
-    text(S.title, c.x + 72, c.y + 60 + lift, { size: 13, color: '#555' });
-    S.lines.forEach((ln, i) => text(ln, c.x + 16, c.y + 92 + lift + i * 19, { size: 13, color: '#2b2b2b', weight: '500' }));
+    roundRect(c.x, c.y + lift, c.w, c.h, 14, null, sel ? S.colour : 'rgba(0,0,0,0.12)', sel ? 3.5 : 1.5);
+    const y = c.y + lift;
+    drawCoccus(c.x + 36, y + 36 + (sel ? Math.sin(t * 5) * 2.5 : 0), 17, S.colour, { face: 1, mood: sel ? 'happy' : '' });
+    text(S.label, c.x + 66, y + 36, { size: 24, color: S.colour, weight: '900' });
+    text(S.title, c.x + 66, y + 54, { size: 12, color: '#555' });
+    ctx.fillStyle = 'rgba(0,0,0,0.08)'; ctx.fillRect(c.x + 14, y + 66, c.w - 28, 1);
+    S.lines.forEach((ln, i) => text(ln, c.x + 14, y + 86 + i * 17, { size: 12.5, color: '#2b2b2b', weight: i ? '500' : '800' }));
     ctx.restore();
   }
-  // level picker (story) and the two extra modes; ↑ ↓ moves through all of them
-  text('Story (↑ ↓):', 170, 389, { size: 13, color: '#2b2b2b', align: 'right', weight: '800' });
+
+  // the two panels
+  for (const p of titlePanels()) {
+    roundRect(p.x, p.y, p.w, p.h, 14, 'rgba(255,255,255,0.32)', 'rgba(23,61,70,0.18)', 1);
+    label(p.title, p.x + 14, p.y + 19);
+  }
   const bestTimes = G.times || (G.times = loadTimes());
   for (const c of levelChips()) {
     const d = LEVELS[c.i], sel = G.titleMode === 'story' && G.startLevel === c.i;
-    roundRect(c.x, c.y, c.w, c.h, 17, sel ? d.theme.accent : 'rgba(255,255,255,0.6)', sel ? null : 'rgba(0,0,0,0.15)', 1.5);
-    text(c.i < 3 ? `${c.i + 1}. ${d.name}` : `★ ${d.name} (bonus)`, c.x + c.w / 2, c.y + 21, { size: 14, color: sel ? '#fff' : '#2b2b2b', align: 'center', weight: '800' });
+    roundRect(c.x, c.y, c.w, c.h, 15, sel ? d.theme.accent : 'rgba(255,255,255,0.75)', sel ? null : 'rgba(0,0,0,0.14)', 1.2);
+    chipText(c.i < 3 ? `${c.i + 1}. ${d.name}` : `★ ${d.name}`, c, sel ? '#fff' : '#2b2b2b');
     const best = bestTimes[runKey(d)], m = best !== undefined && medalFor(d, best);   // this strain's best medal
-    if (m) { circle(c.x + c.w - 14, c.y + 17, 7, m[1]); ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(c.x + c.w - 14, c.y + 17, 7, 0, TAU); ctx.stroke(); }
-    if (codexData().secrets[c.i]) { ctx.save(); ctx.translate(c.x + 16, c.y + 16); ctx.scale(0.42, 0.42); drawSecret(0, 0, t * 60); ctx.restore(); }   // secret found
+    if (m) { circle(c.x + c.w - 14, c.y + 15, 6, m[1]); ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(c.x + c.w - 14, c.y + 15, 6, 0, TAU); ctx.stroke(); }
+    if (codexData().secrets[c.i]) { ctx.save(); ctx.translate(c.x + 15, c.y + 15); ctx.scale(0.38, 0.38); drawSecret(0, 0, t * 60); ctx.restore(); }   // secret found
   }
-  text('Modes:', 170, 429, { size: 13, color: '#2b2b2b', align: 'right', weight: '800' });
   const today = dailyChallenge(dayNumber()), rec = dailyRecord(today.n), counts = codexCounts();
   for (const c of modeChips()) {
     const sel = (c.slot === 4 && G.titleMode === 'daily') || (c.slot === 5 && G.titleMode === 'log');
     const col = c.slot === 4 ? '#7c3aed' : c.slot === 5 ? '#b45309' : '#1f5f66';
-    const pulse = c.slot === 4 && !rec.best ? 0.5 + 0.5 * Math.sin(t * 4) : 0;
-    if (pulse) glow(c.x + c.w / 2, c.y + c.h / 2, c.w * 0.45, '#c4a5ff', 0.25 * pulse);
-    roundRect(c.x, c.y, c.w, c.h, 17, sel ? col : 'rgba(255,255,255,0.6)', sel ? null : rgba(col, 0.6), 1.5);
-    const label = c.slot === 4 ? `☀ Daily #${today.n} · ${LEVELS[today.level].name} p${today.stage + 1} · ${today.mod.label}${rec.best ? ' · ' + fmtTime(rec.best) : ''}`
-      : c.slot === 5 ? `📈 Log phase · best gen ${loadLogBest()}` : `📖 Codex ${counts.seen}/${CODEX.length}`;
-    text(label, c.x + c.w / 2, c.y + 21, { size: 13, color: sel ? '#fff' : '#2b2b2b', align: 'center', weight: '800' });
+    if (c.slot === 4 && !rec.best && !sel) glow(c.x + c.w / 2, c.y + c.h / 2, c.w * 0.4, '#c4a5ff', 0.12 + 0.12 * Math.sin(t * 4));
+    roundRect(c.x, c.y, c.w, c.h, 15, sel ? col : 'rgba(255,255,255,0.75)', sel ? null : rgba(col, 0.55), 1.2);
+    const str = c.slot === 4 ? `☀ Daily #${today.n} · ${LEVELS[today.level].name} part ${today.stage + 1} · ${today.mod.label}${rec.best ? ' · ' + fmtTime(rec.best) : ''}`
+      : c.slot === 5 ? `📈 Log phase · gen ${loadLogBest()}` : `📖 Codex ${counts.seen}/${CODEX.length}`;
+    chipText(str, c, sel ? '#fff' : '#2b2b2b');
   }
-  ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 4);
+
+  // start prompt and footer
   const what = G.titleMode === 'daily' ? 'the daily challenge' : G.titleMode === 'log' ? 'the log phase climb' : LEVELS[G.startLevel].name;
-  text(`Press Enter / Space to start ${what}${G.best && G.titleMode === 'story' ? '   ·   best score ' + G.best : ''}`, VIEW_W / 2, 464, { size: 16, color: '#10202b', align: 'center', weight: '800' });
+  ctx.globalAlpha = 0.65 + 0.35 * Math.sin(t * 4);
+  text(`Press Enter / Space to start ${what}`, VIEW_W / 2, 466, { size: 17, color: '#10202b', align: 'center', weight: '900' });
   ctx.globalAlpha = 1;
-  text(`B codex · C stk dash · hold jump to glide as stp · R retry · G ghost · I micrograph · M sound ${AUDIO.sfxOn ? 'on' : 'off'} · N music ${AUDIO.musicOn ? 'on' : 'off'}`, VIEW_W / 2, 489, { size: 12, color: 'rgba(16,32,43,0.85)', align: 'center', weight: '600' });
-  text('PASN = cell-free spent medium of P. aeruginosa PAO1 (no living Pseudomonas).', VIEW_W / 2, 512, { size: 12, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '500' });
+  if (G.best && G.titleMode === 'story') text(`best score ${G.best}`, VIEW_W / 2, 484, { size: 12, color: 'rgba(16,32,43,0.7)', align: 'center', weight: '700' });
+  text(`B codex · I micrograph · M sound ${AUDIO.sfxOn ? 'on' : 'off'} · N music ${AUDIO.musicOn ? 'on' : 'off'}`, VIEW_W / 2, 506, { size: 12, color: 'rgba(16,32,43,0.8)', align: 'center', weight: '600' });
+  text('PASN = cell-free spent medium of P. aeruginosa PAO1 (no living Pseudomonas).', VIEW_W / 2, 526, { size: 11.5, color: 'rgba(16,32,43,0.7)', align: 'center', weight: '500' });
 }
 
 function drawVignette() { ctx.drawImage(VIGNETTE, 0, 0); }

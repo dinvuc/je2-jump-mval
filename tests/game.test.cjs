@@ -177,7 +177,7 @@ check('resizing and scaled pointer input preserve game and menu coordinates', ()
   reset(); const x=run('P.x'); setDisplayWidth(1200);
   assert.equal(mainCanvas.width,2400); assert.equal(run('P.x'),x); run('draw();');
   setDisplayWidth(480); assert.equal(mainCanvas.width,960); run('draw(); G.state="title";');
-  mainCanvas.handlers.pointerdown({clientX:460/2,clientY:384/2}); assert.equal(run('G.startLevel'),1);
+  mainCanvas.handlers.pointerdown({clientX:366/2,clientY:379/2}); assert.equal(run('G.startLevel'),1);
   mainCanvas.handlers.pointerdown({clientX:750/2,clientY:250/2});
   assert.equal(run('G.strain'),'stp'); assert.equal(run('G.state'),'intro');
 });

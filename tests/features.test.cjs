@@ -141,7 +141,7 @@ check('the codex unlocks entries, counts neutralised enemies and survives bad st
   reset(1);
   run("var omvs=L.ents.filter(e=>e.type==='omv'); killEnemy(omvs[0]); killEnemy(omvs[1]);");
   assert.equal(JSON.parse(storage.get('je2jump_codex_v1')).seen.omv, 2);
-  assert(run("L.tags.some(t => t.text.includes('NEW IN CODEX'))"));
+  assert(!run("L.tags.some(t => t.text.includes('CODEX'))"));   // unlocking is silent
   run("var pep=L.ents.find(e=>e.type==='peptide'); pep.x=P.x; pep.y=P.y; updateEntities();");
   assert.equal(run('codexCounts().peptides'), 1);
   assert(run("CODEX.every(c => c.topic === null || STUDY_FACTS[c.topic])"));
@@ -272,9 +272,40 @@ check('every new screen draws, and screenshots fail softly without a real canvas
   run("G.results=[{name:'TSB',total:1,stars:[true,false],starLabels:['a','b'],secs:60,medal:null,peptides:1,totalPep:6,splits:[],pbSplits:[],deaths:0,reps:3}]; G.score=1; setState('win'); draw();");
   assert(run('shareRunText()').includes('TSB'));
   run("setState('title'); for (const m of ['story','daily','log']) { G.titleMode=m; draw(); }");
-  mainCanvas.handlers.pointerdown({ clientX: 650, clientY: 424 }); assert.equal(run('G.titleMode'), 'log');
-  mainCanvas.handlers.pointerdown({ clientX: 850, clientY: 424 }); assert.equal(run('G.state'), 'codex');
+  mainCanvas.handlers.pointerdown({ clientX: 590, clientY: 417 }); assert.equal(run('G.titleMode'), 'log');
+  mainCanvas.handlers.pointerdown({ clientX: 770, clientY: 417 }); assert.equal(run('G.state'), 'codex');
   run("setState('title'); G.titleMode='story';");
+});
+
+check('the title screen is laid out in aligned, non-overlapping blocks below the difficulty buttons', () => {
+  const cards = json('strainCards()'), panels = json('titlePanels()'), levels = json('levelChips()'), modes = json('modeChips()');
+  const boxes = [...cards, ...panels];
+  const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  const inside = (a, p) => a.x >= p.x && a.y >= p.y && a.x + a.w <= p.x + p.w && a.y + a.h <= p.y + p.h;
+  for (const b of [...boxes, ...levels, ...modes]) assert(b.x >= 0 && b.x + b.w <= 960 && b.y >= 176 && b.y + b.h <= 448, JSON.stringify(b));
+  boxes.forEach((a, i) => boxes.slice(i + 1).forEach(b => assert(!overlap(a, b))));
+  const chips = [...levels, ...modes];
+  chips.forEach((a, i) => chips.slice(i + 1).forEach(b => assert(!overlap(a, b))));
+  for (const c of levels) assert(inside(c, panels[0])); for (const c of modes) assert(inside(c, panels[1]));
+  // the cards and the two panels share the same left and right edges
+  assert.equal(cards[0].x, panels[0].x); assert.equal(cards[2].x + cards[2].w, panels[1].x + panels[1].w);
+  // the HTML difficulty buttons end above the strain label (CSS top 20.96 % of 544 px, 32 px buttons + help line)
+  const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf8');
+  const top = Number(/\.run-settings \{[^}]*top: ([\d.]+)%/.exec(css)[1]) * 5.44;
+  assert(top + 32 + 22 < cards[0].y - 14, 'buttons and help text clear the strain label');
+});
+
+check('info signs speak only after you stand on them for a second, in a fading panel', () => {
+  reset(0);
+  run('var sg=L.signs[0]; P.x=sg.tx*TILE+4; P.y=(sg.ty+1)*TILE-P.h; P.vx=0; P.vy=0; P.onGround=true;');
+  run('for (let i=0;i<59;i++) updateSigns();');
+  assert.equal(run('L.signShown'), undefined); assert.equal(run('L.signA'), 0);
+  run('draw(); updateSigns();'); assert(run('L.signShown === sg'));
+  run('for (let i=0;i<12;i++) updateSigns(); draw();'); assert.equal(run('L.signA'), 1);
+  run('P.x += 3 * TILE; for (let i=0;i<4;i++) updateSigns();'); assert(run('L.signA > 0 && L.signA < 1'));
+  run('for (let i=0;i<10;i++) updateSigns(); draw();'); assert.equal(run('L.signA'), 0);
+  // jumping over a sign never opens it
+  run('P.x=sg.tx*TILE+4; P.onGround=false; for (let i=0;i<90;i++) updateSigns();'); assert.equal(run('L.signA'), 0);
 });
 
 console.log('Passed ' + checks + ' feature checks.');

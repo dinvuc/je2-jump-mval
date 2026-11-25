@@ -43,14 +43,13 @@ function loadCodex() {
 function codexData() { return G.codex || (G.codex = loadCodex()); }
 function saveCodex() { try { localStorage.setItem(CODEX_KEY, JSON.stringify(codexData())); } catch { /* storage full / private mode */ } }
 const codexEntry = id => CODEX.find(c => c.id === id);
-// Record a meeting. The first one adds a label "NEW IN CODEX" next to the player.
+// Record a meeting (silently: the codex shows it next time you open it).
 function codexSee(id) {
   const entry = codexEntry(id);
   if (!entry) return;
   const data = codexData(), first = !data.seen[id];
   data.seen[id] = (Number(data.seen[id]) || 0) + 1;
   if (first || entry.group === 'enemy') saveCodex();   // enemies keep a neutralised count
-  if (first && L && P && G.state === 'play') tag('NEW IN CODEX · ' + entry.name, P.x + P.w / 2, P.y - 48, '#c3ffdf', 150);
 }
 // Hazards and pickups: record them once per level visit.
 function meet(id) {

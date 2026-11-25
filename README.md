@@ -104,7 +104,7 @@ through all of them.
   pickups you collected. Each entry shows the short in-game line and the
   matching checked study note from `STUDY_FACTS` (no new biology text). It also
   has a **peptide album** (six peptides per map, remembered across runs) and the
-  secrets you found. The first meeting adds a small "NEW IN CODEX" label.
+  secrets you found. Entries unlock silently, without a message in play.
 
 ### Sharing, race links and micrographs
 
@@ -222,7 +222,7 @@ boss is unaffected. Subsequent waves are 55–80 s apart.
 | cryo-vial | checkpoint; saved stocks are counted in the HUD |
 | large vial marked PART 2 | end of part 1: saves a stock and moves on to part 2 |
 | green rods / alginate colony | living P. aeruginosa cells / boss in the CF setting only |
-| info vesicle | approach to read a short tip |
+| info vesicle | stand on it for about a second to read a short tip (a ring fills around the icon); the tip fades in as a small translucent panel |
 | wall or floor with hairline cracks | hidden passage to a secret room; the cell passes, enemies do not |
 | golden cluster | secret collectible (+1000), one per map; a game object, not a biological structure |
 
@@ -259,7 +259,9 @@ which bounces; the score rolls up; lost flasks shake. The camera looks ahead in
 the direction you face and down while you fall, and screen shake is smooth
 instead of random jitter. Results play in beats: the score counts up, stars stamp
 in one by one with rising notes, the medal drops in and a NEW BEST stamp lands.
-Most first-time tutorial banners became short labels in the world.
+Most first-time tutorial banners became short labels in the world. The title
+screen groups the strain cards, a STORY panel (the four maps) and a MORE WAYS TO
+PLAY panel (daily challenge, log phase, codex), all aligned to the same width.
 
 ## Music and sound
 

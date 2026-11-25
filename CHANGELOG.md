@@ -32,6 +32,10 @@ The same entries appear in the "What's new?" lab note on the page.
 - Pickups fly into the HUD, the score rolls, flasks shake, results stamp in beats.
 - Camera looks ahead and down; smoother screen shake.
 - Most first-time tutorial banners became short labels in the world.
+- Info signs speak only after you stand on them for about a second, in a small
+  translucent panel that fades in and out.
+- Title screen reorganised: strain cards, a STORY panel and a MORE WAYS TO PLAY
+  panel, aligned and clear of the difficulty buttons.
 
 ### Structure
 - New files: js/audio.js (moved out of game.js), js/effects.js, js/codex.js,
