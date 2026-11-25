@@ -308,4 +308,80 @@ check('info signs speak only after you stand on them for a second, in a fading p
   run('P.x=sg.tx*TILE+4; P.onGround=false; for (let i=0;i<90;i++) updateSigns();'); assert.equal(run('L.signA'), 0);
 });
 
+check('the codex draws every icon at every moment and can always be closed', () => {
+  // with every entry unlocked, from the title and from the pause menu
+  run("G.codex = { seen: Object.fromEntries(CODEX.map(c => [c.id, 3])), peptides: {}, secrets: { 0: true, 2: true } };");
+  for (const from of ['title', 'paused']) {
+    if (from === 'title') run("L = null; setState('title'); openCodex('title');"); else { reset(3); run("setState('paused'); openCodex('paused');"); }
+    for (let ms = 0; ms < 8000; ms += 113) {
+      run('performance.now = () => ' + ms + '; G.codexIdx = ' + (ms / 113 % 21 | 0) + '; draw();');
+    }
+    run('pressed.pause = true; update();'); assert.equal(run('G.state'), from);
+    run("openCodex('" + from + "'); codexClick(880, 36);"); assert.equal(run('G.state'), from);
+  }
+  run('performance.now = () => 1000; G.codex = null;');
+  // a drawing error never stops the main loop
+  assert(fs.readFileSync(path.join(__dirname, '..', 'js', 'game.js'), 'utf8').includes('One bad frame must never stop the game'));
+});
+
+check('Study plays the story only: the daily challenge and the log phase are greyed out', () => {
+  const { controls } = require('./harness.cjs');
+  run("setState('title'); G.difficulty = 100; G.titleMode = 'daily';");
+  controls['mode-study'].handlers.click();
+  assert.equal(run('G.difficulty'), 0); assert.equal(run('G.titleMode'), 'story');
+  run('G.startLevel = 3; pressed.down = true; update();'); assert.equal(run('titleSlot()'), 0);   // wraps past the modes
+  run('pressed.up = true; update();'); assert.equal(run('titleSlot()'), 3);
+  assert.equal(run('setTitleSlot(4)'), false); assert.equal(run('G.titleMode'), 'story');
+  mainCanvas.handlers.pointerdown({ clientX: 590, clientY: 417 }); assert.equal(run('G.titleMode'), 'story');
+  run("G.titleMode = 'log'; draw(); startGame();"); assert.equal(run('G.mode'), 'story'); assert.equal(run('L.def.endless'), undefined);
+  // the codex stays open to Study, and Normal brings the modes back
+  run("setState('title');"); mainCanvas.handlers.pointerdown({ clientX: 770, clientY: 417 }); assert.equal(run('G.state'), 'codex');
+  run("setState('title');"); controls['mode-normal'].handlers.click();
+  assert.equal(run('setTitleSlot(5)'), true); assert.equal(run('G.titleMode'), 'log');
+  run("G.titleMode = 'story';");
+});
+
+check('stk dashes on the ground and once per jump in the air, and its dash defeats enemies', () => {
+  reset(1, 'stk');
+  run('P.x=34*TILE; P.y=22*TILE; P.vy=3; P.onGround=false; startDash();');   // open air in SNpulse
+  assert.equal(run('P.dash'), 12); assert(run('P.airDash'));
+  run('updatePlay();'); assert(run('P.vy <= 0.4'));   // the air dash hangs
+  run('P.dash=0; P.dashCool=0; startDash();'); assert.equal(run('P.dash'), 0);   // only one per jump
+  run('P.onGround=true; P.groundT=0; P.coyote=0; P.airDash=false; P.dashCool=0; startDash();'); assert.equal(run('P.dash'), 12);
+  // a dash goes through an enemy instead of costing a replicate
+  run("var la=L.ents.find(e=>e.type==='lasa'); P.inv=0; P.reps=3; P.x=la.x; P.y=la.y+la.h-P.h; P.dash=8; enemyContact(la,'x');");
+  assert.equal(run('la.alive'), false); assert.equal(run('P.reps'), 3);
+  // a superoxide radical too
+  run("var r=spawnEnemy('rosb', P.x+12, P.y+14, { vx: 3 }); L.ents.push(...L.spawnQ); L.spawnQ=[]; P.dash=8; enemyContact(r,'x','ros');");
+  assert.equal(run('r.alive'), false); assert.equal(run('P.reps'), 3);
+  run('draw();');
+});
+
+check('stp dives with down in the air, smashes enemies and lands with a shockwave', () => {
+  reset(0, 'stp');
+  run('P.x=30*TILE; P.y=20*TILE; P.vy=1; P.onGround=false; pressed.down=true; updatePlay();');
+  assert(run('P.diving')); assert.equal(run('P.vy'), 14);
+  run('for (let i=0;i<40 && P.diving;i++) updatePlay();');
+  assert(!run('P.diving')); assert(run('P.onGround'));
+  // the shockwave breaks the low debris beside the landing spot and defeats a nearby enemy
+  reset(0, 'stp');
+  run("var lasa={type:'lasa',tx:29,ty:25,x:29*TILE,y:25*TILE+10,w:28,h:22,vx:0,alive:true,t:0}; L.ents.push(lasa);");
+  run('P.x=31*TILE+4; P.y=22*TILE; P.vy=1; P.onGround=false; P.inv=0; startDive(); for (let i=0;i<40 && P.diving;i++) updatePlay();');
+  assert.equal(run('lasa.alive'), false); assert.equal(run('P.reps'), 3);
+  assert.equal(run('L.grid[25][31]'), ' ');
+  // anc and stk cannot dive; a dive is not possible on the ground
+  reset(0, 'anc'); run('P.onGround=false; startDive();'); assert(!run('P.diving'));
+  reset(0, 'stp'); run('P.onGround=true; startDive();'); assert(!run('P.diving'));
+  run('draw();');
+});
+
+check('a dive cracks the closed boss shell; a dash slams into it', () => {
+  reset(3, 'stp'); run("enterStage(1); var boss=L.ents.find(e=>e.type==='boss'); L.bossActive=true; boss.state='walk'; boss.open=0;");
+  run('var b=bossBox(boss); P.x=boss.bx-P.w/2; P.y=b.y-P.h+4; P.vy=14; P.diving=true; updateBoss(boss, boss.bx);');
+  assert.equal(run('boss.hp'), 19); assert(!run('P.diving'));
+  reset(3, 'stk'); run("enterStage(1); var boss=L.ents.find(e=>e.type==='boss'); L.bossActive=true; boss.state='walk'; boss.open=1;");
+  run('var b=bossBox(boss); P.x=b.x+10; P.y=b.y+20; P.dash=8; P.inv=0; updateBoss(boss, boss.bx);');
+  assert.equal(run('boss.hp'), 18); assert.equal(run('P.reps'), 3);
+});
+
 console.log('Passed ' + checks + ' feature checks.');

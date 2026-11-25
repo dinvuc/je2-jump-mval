@@ -34,6 +34,13 @@ The same entries appear in the "What's new?" lab note on the page.
 - Most first-time tutorial banners became short labels in the world.
 - Info signs speak only after you stand on them for about a second, in a small
   translucent panel that fades in and out.
+- stk: C dashes on the ground and once per jump in the air; dashes defeat enemies
+  and superoxide and hit the boss; cooldown 0.75 s (was 1.5 s).
+- stp: glide lasts 1.5 s (was 1 s); ↓ in the air dives, smashing enemies, with a
+  landing shockwave that defeats nearby enemies and breaks debris.
+- Study slows only the world (enemies, hazards, timers); the cell moves at full
+  speed. Study plays the story only; daily and log phase need Normal or Hard.
+- A drawing error can no longer freeze the game (the codex froze on an HCN icon).
 - Title screen reorganised: strain cards, a STORY panel and a MORE WAYS TO PLAY
   panel, aligned and clear of the difficulty buttons.
 

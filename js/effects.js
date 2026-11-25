@@ -151,7 +151,7 @@ function playerMood() {
   if (P.dizzy > 30) return 'hurt';
   if (P.happy > 0) return 'happy';
   if (P.scared) return 'scared';
-  if (P.dash > 0 || (G.strain === 'stp' && keys.jump && P.vy > 0 && P.glide > 0 && P.glide < 60)) return 'effort';
+  if (P.dash > 0 || P.diving || (G.strain === 'stp' && keys.jump && P.vy > 0 && P.glide > 0 && P.glide < GLIDE_FRAMES)) return 'effort';
   return '';
 }
 // Sweat when time is short (pulse) or the depleted medium is close (log phase).

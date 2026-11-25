@@ -118,7 +118,7 @@ function drawCodexIcon(id, x, y, locked) {
     else if (id === 'boss') {
       ctx.translate(x, y + 12); ctx.scale(0.36, 0.36);
       drawBoss({ t, bx: 0, by: 0, jy: 0, open: 0.3, state: 'walk', hitT: 0, timer: 0 });
-    } else if (id === 'hcn') drawEntity({ ...stub, y: y - 8, active: true });
+    } else if (id === 'hcn') drawEntity({ ...stub, y: y - 8, t: 150 + (t % 60), active: true });   // always mid-puff
     else if (id === 'rosb') drawEntity({ ...stub, vx: 3 });
     else drawEntity(stub);
   } finally {

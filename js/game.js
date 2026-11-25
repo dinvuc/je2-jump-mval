@@ -106,7 +106,7 @@ canvas.addEventListener('pointerdown', e => {
     const mode = modeChips().find(inside);
     if (mode) {
       if (mode.slot === 'codex') { AUDIO.play('click'); openCodex('title'); }
-      else { setTitleSlot(mode.slot); AUDIO.play('move'); }
+      else AUDIO.play(setTitleSlot(mode.slot) ? 'move' : 'off');   // greyed out in Study
       return;
     }
     const hit = strainCards().find(inside);
@@ -177,6 +177,7 @@ for (const button of difficultyButtons) {
   button.addEventListener('click', () => {
     if (G.state !== 'title') return;
     G.difficulty = Number(button.dataset.difficulty);
+    if (G.difficulty < 100 && G.titleMode !== 'story') G.titleMode = 'story';   // Study plays the story only
     G.best = loadBest(bestScoreKey());
     syncDifficultyControl();
     AUDIO.play('move');
@@ -214,6 +215,7 @@ function setState(s) {
 
 // Start at the level picked on the title screen; later levels follow in order.
 function startGame() {
+  if (G.difficulty < 100) G.titleMode = 'story';   // the extra modes need Normal or Hard
   if (G.titleMode === 'daily') { startDaily(); return; }
   if (G.titleMode === 'log') { startLogPhase(); return; }
   G.mode = 'story';
@@ -246,7 +248,7 @@ function loadLevel(i, opts = {}) {
     totalCys: count('cystine'), totalPep: count('peptide'), totalStocks: count('check') + builds.length - 1, stocks: 0,
     mods, maxReps: mods.maxReps || 3, timeBase: 0, splits: [], gen: 0,
     lookX: VIEW_W * 0.1, lookY: 0, tags: [], bigs: [], flyers: [], hudBump: {}, shownScore: NaN,
-    attempts: {}, attempt: null, partArt: {}, bumps: new Map(), rivalIndex: 0,
+    attempts: {}, attempt: null, partArt: {}, bumps: new Map(), rivalIndex: 0, worldAcc: 0, entTicks: 0,
   };
   setStageWorld(builds[stage], stage);
   // A daily challenge in part 2 of SNpulse starts with the clock where part 2 begins.
@@ -260,7 +262,7 @@ function loadLevel(i, opts = {}) {
     onGround: false, coyote: 0, buffer: 0, djReady: true, groundT: 0,
     face: 1, inv: 0, slow: 0, shield: 0, magnet: 0, phos: 0, reps: L.maxReps, squash: 0, ride: null, roll: 0,
     ammo: 0, gold: 0, shootCool: 0, sticky: 0, belt: 0, sprung: false,
-    glide: 60, dash: 0, dashCool: 0, shootFlash: 0,
+    glide: GLIDE_FRAMES, dash: 0, dashCool: 0, shootFlash: 0, airDash: false, diving: false,
     chain: 0, happy: 0, spin: 0, look: null, scared: false,
   };
   L.rival = rivalMatches() ? G.rival : null;
@@ -551,6 +553,11 @@ function flash(x, y, r) { L.fx.push({ x, y, vx: 0, vy: 0, grav: 0, life: 9, max:
 function enemyContact(e, msg, kind = 'enemy') {
   const b = enemyBox(e);
   if (!overlap(P, b)) return;
+  if (P.dash > 0 || P.diving) {   // stk dash and stp dive cut straight through
+    killEnemy(e); if (!P.onGround) stompChain();
+    if (P.dash > 0) shards(b.x + b.w / 2, b.y + b.h / 2, '#ffcf70', 5, 3);
+    return;
+  }
   if (P.vy > 0 && P.y + P.h - P.vy <= b.y + 8) { killEnemy(e); P.vy = JUMP_V * 0.7; P.sprung = false; P.squash = 0.32; stompChain(); }
   else hurt(kind, msg);
 }
@@ -622,7 +629,12 @@ function updateBoss(e, pcx) {
       break;
   }
   const b = bossBox(e);
-  if (overlap(P, b)) {
+  if (overlap(P, b) && (P.dash > 0 || P.diving)) {
+    damageBoss(e, P.diving ? (e.open > 0.6 ? 3 : 1) : (e.open > 0.6 ? 2 : 1));
+    if (P.diving) { P.diving = false; P.vy = JUMP_V * 0.85; P.sprung = false; }
+    else { P.dash = 0; P.vx = -P.face * 6; P.vy = -4; }
+    ring(P.x + P.w / 2, P.y + P.h / 2, 6, 50, '#ffffff', 16, 3);
+  } else if (overlap(P, b)) {
     if (P.vy > 0 && P.y + P.h - P.vy <= b.y + 14) {
       P.vy = JUMP_V * 0.85; P.sprung = false; P.squash = 0.32;
       if (e.open > 0.6) { damageBoss(e, 2); stompChain(); }
@@ -860,7 +872,7 @@ function hurt(kind, msg) {
   loseReplicate(msg, quiet);
 }
 function respawn() {
-  P.x = L.respawn.x; P.y = L.respawn.y; P.vx = 0; P.vy = 0; P.inv = 60; P.slow = 0; P.ride = null;
+  P.x = L.respawn.x; P.y = L.respawn.y; P.vx = 0; P.vy = 0; P.inv = 60; P.slow = 0; P.ride = null; P.diving = false; P.dash = 0;
   snapCamera();
 }
 
@@ -883,10 +895,13 @@ function updatePlay() {
     return;
   }
 
+  // Study: the world (enemies, hazards and their timers, crumbling cells, coughs)
+  // runs at studyPace(); the cell itself always moves at full speed.
+  L.worldAcc = (L.worldAcc || 0) + (L.difficulty < 100 ? studyPace(L.difficulty) : 1);
+  const worldTick = L.worldAcc >= 1;
+  if (worldTick) L.worldAcc -= 1;
   updateMovers();
-  updateLysis();
-  updateCough();
-  updateAntibiotic();
+  if (worldTick) { updateLysis(); updateCough(); updateAntibiotic(); }
   L.solids = [];
   L.plats = L.movers;
   // Ride along with the platform you stand on.
@@ -910,7 +925,7 @@ function updatePlay() {
   // Jump, with coyote time and a small input buffer so it feels fair.
   if (took('jump')) P.buffer = BUFFER + Math.round(6 * Math.max(0, 1 - L.difficulty / 100)); else if (P.buffer > 0) P.buffer--;
   if (P.onGround) {
-    P.coyote = COYOTE + Math.round(12 * Math.max(0, 1 - L.difficulty / 100)); P.groundT++; P.glide = 60;
+    P.coyote = COYOTE + Math.round(12 * Math.max(0, 1 - L.difficulty / 100)); P.groundT++; P.glide = GLIDE_FRAMES; P.airDash = false;
     if (dj > 0 && P.groundT >= S.recharge) P.djReady = true;
     P.chain = 0;   // a stomp chain ends when you land
   } else { P.coyote--; P.groundT = 0; }
@@ -928,12 +943,15 @@ function updatePlay() {
       ring(P.x + P.w / 2, P.y + P.h, 4, 26, '#d7b8f5', 14, 2);
       AUDIO.play('dj');
     } else if (dj === 0 && !P.onGround) {
-      tagOnce('nodj', M.grounded ? 'GROUNDED TODAY · NO DOUBLE JUMP' : 'NO DOUBLE JUMP · C = GROUND DASH', '#ffcf70');
+      tagOnce('nodj', M.grounded ? 'GROUNDED TODAY · NO DOUBLE JUMP' : 'NO DOUBLE JUMP · C = DASH, ALSO IN THE AIR', '#ffcf70');
     }
   }
   if (!keys.jump && !P.sprung && P.vy < -3.5) P.vy = -3.5;   // let go early = lower jump (not after a bounce)
   P.vy = Math.min(P.vy + GRAV * M.grav, MAX_FALL);
-  if (G.strain === 'stp' && !M.grounded && keys.jump && P.vy > 0 && P.glide > 0) { P.vy = Math.min(P.vy, 2.4); P.glide--; }
+  if (took('down') && !P.onGround) startDive();
+  if (P.diving) P.vy = DIVE_V;
+  else if (P.dash > 0 && !P.onGround) P.vy = Math.min(P.vy, 0.4);   // an air dash hangs
+  if (G.strain === 'stp' && !M.grounded && !P.diving && keys.jump && P.vy > 0 && P.glide > 0) { P.vy = Math.min(P.vy, 2.4); P.glide--; }
   if (P.vy >= 0) P.sprung = false;
 
   // Shoot PSMs.
@@ -949,6 +967,7 @@ function updatePlay() {
   const wasGround = P.onGround, fallV = P.vy;
   moveX();
   moveY();
+  if (P.diving && P.onGround) diveImpact();
   if (P.onGround && !wasGround && fallV > 4) {
     P.squash = Math.min(0.3, fallV / 32);
     burst(P.x + P.w / 2, P.y + P.h, rgba(L.def.theme.eps, 0.9), 6, 1.6, -0.02, 26);
@@ -995,7 +1014,7 @@ function updatePlay() {
   }
 
   recordRun();
-  updateEntities();
+  if (worldTick) { snapshotEntities(); updateEntities(); }
   if (G.state !== 'play') return;
   if (L.def.endless) { updateLogPhase(); if (G.state !== 'play') return; }
   updateShots();
@@ -1092,7 +1111,7 @@ function updateEntities() {
       case 'spring': // a swollen cell: land on it and it throws you up
         if (e.sq > 0) e.sq--;
         if (P.vy >= 0 && Math.abs(pcx - cx) < 20 && P.y + P.h >= e.y + 14 && P.y + P.h <= e.y + TILE + 0.5) {
-          P.y = e.y + 14 - P.h; P.vy = SPRING_V; P.onGround = false; P.coyote = 0; P.ride = null; P.sprung = true;
+          P.y = e.y + 14 - P.h; P.vy = SPRING_V; P.onGround = false; P.coyote = 0; P.ride = null; P.sprung = true; P.diving = false;
           P.squash = -0.3; e.sq = 14;
           AUDIO.play('boing');
           tagOnce('spring', 'BOING!', '#ffe9c4');
@@ -1117,7 +1136,11 @@ function updateEntities() {
         if (isSolid(tileAt(Math.floor((e.x + 16) / TILE), Math.floor((e.y + 20) / TILE))) || e.y > L.rows * TILE) {
           e.alive = false; burst(e.x + 16, e.y + 16, '#3d86d9', 6, 1.8, 0.1, 18); break;
         }
-        if (overlap(P, { x: e.x + 9, y: e.y + 9, w: 14, h: 14 })) { e.alive = false; hurt('ros', 'Pyocyanin from the colony made ROS in your cell.'); }
+        if (overlap(P, { x: e.x + 9, y: e.y + 9, w: 14, h: 14 })) {
+          e.alive = false;
+          if (P.dash > 0 || P.diving) burst(e.x + 16, e.y + 16, '#3d86d9', 8, 2.4, 0.1, 18);
+          else hurt('ros', 'Pyocyanin from the colony made ROS in your cell.');
+        }
         break;
       }
       case 'rosgun': { // pyocyanin redox launcher: fires superoxide radicals at you
@@ -1340,7 +1363,7 @@ function updateEntities() {
   if (spawned.length) L.ents.push(...spawned);
   if (L.spawnQ.length) { L.ents.push(...L.spawnQ); L.spawnQ = []; }
   // Remove dead drops so the list does not grow forever.
-  if (L.time % 120 === 0) L.ents = L.ents.filter(e => e.alive || !['drop', 'glob', 'rosb', 'pa'].includes(e.type));
+  if (++L.entTicks % 120 === 0) L.ents = L.ents.filter(e => e.alive || !['drop', 'glob', 'rosb', 'pa'].includes(e.type));
 }
 
 function finishLevel() {
@@ -1402,11 +1425,19 @@ function menuSelect() {
 // ---- the title screen: strain cards, level chips and mode chips --------------------
 // Slots 0-3 are the story levels, 4 the daily challenge and 5 the log phase.
 function titleSlot() { return G.titleMode === 'daily' ? 4 : G.titleMode === 'log' ? 5 : G.startLevel; }
+// Study plays the story only, so the daily challenge and the log phase are skipped.
+const modesAllowed = () => G.difficulty >= 100;
+function stepTitleSlot(d) {
+  const n = modesAllowed() ? 6 : 4;
+  setTitleSlot((Math.min(titleSlot(), n - 1) + d + n) % n);
+}
 function setTitleSlot(slot) {
   slot = (slot + 6) % 6;
+  if (slot >= 4 && !modesAllowed()) return false;
   if (slot < 4) { G.titleMode = 'story'; G.startLevel = slot; }
   else G.titleMode = slot === 4 ? 'daily' : 'log';
   if (G.titleMode === 'daily') G.strain = dailyChallenge(dayNumber()).strain;
+  return true;
 }
 function updateTitle() {
   const order = ['anc', 'stk', 'stp'], locked = G.titleMode === 'daily';
@@ -1417,8 +1448,8 @@ function updateTitle() {
     if (took('left')) { G.strain = order[(order.indexOf(G.strain) + 2) % 3]; AUDIO.play('move'); }
     if (took('right')) { G.strain = order[(order.indexOf(G.strain) + 1) % 3]; AUDIO.play('move'); }
   }
-  if (took('up')) { setTitleSlot(titleSlot() - 1); AUDIO.play('move'); }
-  if (took('down')) { setTitleSlot(titleSlot() + 1); AUDIO.play('move'); }
+  if (took('up')) { stepTitleSlot(-1); AUDIO.play('move'); }
+  if (took('down')) { stepTitleSlot(1); AUDIO.play('move'); }
   if (took('biology')) { AUDIO.play('click'); openCodex('title'); return; }
   if (took('confirm')) { AUDIO.play('click'); startGame(); }
 }
@@ -1443,7 +1474,7 @@ function update() {
         if (took('biology')) toggleStudyStation();
       }
       if (G.hitStop > 0) { G.hitStop--; break; }   // a tiny freeze on big hits
-      if (L.difficulty !== 100) {
+      if (L.difficulty > 100) {   // Hard: the whole game runs faster
         G.studyTick += studyPace(L.difficulty);
         while (G.studyTick >= 1 && G.state === 'play') {
           G.studyTick -= 1;
@@ -2240,11 +2271,25 @@ function drawSignText(cx, cy) {
   ctx.restore();
 }
 
+const LERP_FIELDS = ['x', 'y', 'cx', 'cy', 'bx', 'jy', 't'];
+// Study steps the world less often than it draws; remember where everything was.
+function snapshotEntities() {
+  if (L.difficulty >= 100) return;
+  for (const e of L.ents) e.pv = LERP_FIELDS.map(k => e[k]);
+}
 function drawEntities(cx, cy) {
+  const r = L.difficulty < 100 ? clamp(L.worldAcc, 0, 1) : 1;
   for (const e of L.ents) {
     if (!e.alive || e.type === 'start') continue;
     if (e.type !== 'boss' && (e.x < cx - 140 || e.x > cx + VIEW_W + 140 || e.y < cy - 140 || e.y > cy + VIEW_H + 140)) continue;
+    if (!e.pv || r >= 1) { drawEntity(e); continue; }
+    const now = LERP_FIELDS.map(k => e[k]);
+    LERP_FIELDS.forEach((k, i) => {
+      const a = e.pv[i], b = now[i];
+      if (Number.isFinite(a) && Number.isFinite(b) && Math.abs(b - a) < 48) e[k] = a + (b - a) * r;
+    });
     drawEntity(e);
+    LERP_FIELDS.forEach((k, i) => { e[k] = now[i]; });
   }
   drawShotsAndBubbles();
 }
@@ -2551,7 +2596,7 @@ function drawEntity(e) {
         circle(X, base - 6, 3.5, '#2b2833');
         const ph = e.t % 220;
         if (e.active || e.warn) {
-          const k = e.active ? Math.min(1, (ph - 140) / 20) : (ph - 110) / 30 * 0.3;
+          const k = clamp(e.active ? (ph - 140) / 20 : (ph - 110) / 30 * 0.3, 0, 1);
           for (let i = 0; i < 6; i++) {
             const a = i * 1.1 + e.t * 0.03, rr = (14 + i * 3) * k + 4;
             const px = X + Math.sin(a) * 14 * k, py = base - 14 - i * 9 * k;
@@ -3000,7 +3045,7 @@ function titlePanels() {
   const w = (TITLE.right - TITLE.left - TITLE.gap) / 2;
   return [
     { title: 'STORY  ·  ↑ ↓ to pick', x: TITLE.left, y: TITLE.panelY, w, h: TITLE.panelH },
-    { title: 'MORE WAYS TO PLAY', x: TITLE.left + w + TITLE.gap, y: TITLE.panelY, w, h: TITLE.panelH },
+    { title: G.difficulty < 100 ? 'MORE WAYS TO PLAY  ·  Normal / Hard only' : 'MORE WAYS TO PLAY', x: TITLE.left + w + TITLE.gap, y: TITLE.panelY, w, h: TITLE.panelH },
   ];
 }
 // Chips sit inside the panels: 14 px padding, a 26 px header, two rows of 30 px.
@@ -3104,12 +3149,15 @@ function drawTitle() {
   const today = dailyChallenge(dayNumber()), rec = dailyRecord(today.n), counts = codexCounts();
   for (const c of modeChips()) {
     const sel = (c.slot === 4 && G.titleMode === 'daily') || (c.slot === 5 && G.titleMode === 'log');
+    const off = c.slot !== 'codex' && !modesAllowed();
+    ctx.save(); if (off) ctx.globalAlpha = 0.42;
     const col = c.slot === 4 ? '#7c3aed' : c.slot === 5 ? '#b45309' : '#1f5f66';
-    if (c.slot === 4 && !rec.best && !sel) glow(c.x + c.w / 2, c.y + c.h / 2, c.w * 0.4, '#c4a5ff', 0.12 + 0.12 * Math.sin(t * 4));
+    if (c.slot === 4 && !rec.best && !sel && !off) glow(c.x + c.w / 2, c.y + c.h / 2, c.w * 0.4, '#c4a5ff', 0.12 + 0.12 * Math.sin(t * 4));
     roundRect(c.x, c.y, c.w, c.h, 15, sel ? col : 'rgba(255,255,255,0.75)', sel ? null : rgba(col, 0.55), 1.2);
     const str = c.slot === 4 ? `☀ Daily #${today.n} · ${LEVELS[today.level].name} part ${today.stage + 1} · ${today.mod.label}${rec.best ? ' · ' + fmtTime(rec.best) : ''}`
       : c.slot === 5 ? `📈 Log phase · gen ${loadLogBest()}` : `📖 Codex ${counts.seen}/${CODEX.length}`;
-    chipText(str, c, sel ? '#fff' : '#2b2b2b');
+    chipText(off ? (c.slot === 4 ? '☀ Daily challenge · not in Study' : '📈 Log phase · not in Study') : str, c, sel ? '#fff' : '#2b2b2b');
+    ctx.restore();
   }
 
   // start prompt and footer
@@ -3328,11 +3376,19 @@ function drawLevelResults() {
 
 // ---- main loop: fixed-step update, draw every animation frame -----------------------
 let last = performance.now(), acc = 0;
+// One bad frame must never stop the game: errors are logged once and the loop goes on.
+let frameError = false;
 function frame(now) {
-  acc += Math.min(100, now - last); last = now;
-  while (acc >= STEP_MS) { update(); acc -= STEP_MS; }
-  draw();
   requestAnimationFrame(frame);
+  try {
+    acc += Math.min(100, now - last); last = now;
+    while (acc >= STEP_MS) { update(); acc -= STEP_MS; }
+    draw();
+  } catch (err) {
+    acc = 0;
+    try { ctx.restore(); ctx.globalAlpha = 1; ctx.setTransform(canvas.width / VIEW_W, 0, 0, canvas.height / VIEW_H, 0, 0); } catch { /* best effort */ }
+    if (!frameError) { frameError = true; console.error(err); }
+  }
 }
 AUDIO.music('title');
 requestAnimationFrame(frame);

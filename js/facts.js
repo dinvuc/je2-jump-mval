@@ -17,14 +17,14 @@ const STRAINS = {
   stk: {
     key: 'stk', label: 'stk', title: 'stk1::Tn (NE217)', colour: '#E69F00',
     doubleJump: 0, recharge: 0, medalFactor: 1.12,
-    ability: 'C · ground dash',
-    lines: ['GROUNDED · C to dash', 'Burst through debris.', 'Every main route is jumpable.'],
+    ability: 'C · dash, also in the air',
+    lines: ['DASHER · C to dash, also in the air', 'Dashes cut through enemies.', 'Burst through debris.'],
   },
   stp: {
     key: 'stp', label: 'stp', title: 'stp1::Tn (NE1919)', colour: '#009E73',
     doubleJump: 0.6, recharge: 30, medalFactor: 1.08,
-    ability: 'DRIFTER · hold jump to glide',
-    lines: ['DRIFTER · hold jump to glide', 'Weak jump, gentler descents.', 'No Stp1; much less Stk1 (polar)'],
+    ability: 'DRIFTER · glide, ↓ to dive',
+    lines: ['DRIFTER · glide, ↓ in the air to dive', 'Dives smash enemies and debris.', 'No Stp1; much less Stk1 (polar)'],
   },
 };
 

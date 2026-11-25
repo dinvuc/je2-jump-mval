@@ -62,11 +62,46 @@ function saveSplits(key, splits) {
 function runSecs() { return (L.time - (L.timeBase || 0)) / 60; }
 const fmtDelta = d => (d < 0 ? '−' : '+') + Math.abs(d).toFixed(1) + ' s';
 
+// stk: a dash on the ground, or once per jump in the air (the cell hangs while it
+// dashes). A dashing cell defeats the enemies it hits (see enemyContact).
+const DASH_FRAMES = 12, DASH_COOL = 45;
 function startDash() {
-  if (G.strain !== 'stk' || P.dashCool > 0 || !P.onGround) return;
-  P.dash = 12; P.dashCool = 90; P.squash = 0.18;
+  if (G.strain !== 'stk' || P.dashCool > 0 || P.dash > 0) return;
+  if (!P.onGround) {
+    if (P.airDash) return;
+    P.airDash = true; P.vy = Math.min(P.vy, 0); P.diving = false;
+  }
+  P.dash = DASH_FRAMES; P.dashCool = DASH_COOL; P.squash = 0.18;
   AUDIO.play('dash');
   burst(P.x + P.w / 2, P.y + P.h / 2, '#ffcf70', 8, 2);
+  ring(P.x + P.w / 2, P.y + P.h / 2, 6, 30, '#ffcf70', 12, 2);
+}
+// stp: down in the air starts a dive. It smashes through enemies on the way and
+// ends with a shockwave that defeats enemies nearby and breaks debris.
+const DIVE_V = 14, GLIDE_FRAMES = 90;
+function startDive() {
+  if (G.strain !== 'stp' || L.mods.grounded || P.onGround || P.diving || P.dash > 0) return;
+  P.diving = true; P.vy = DIVE_V; P.vx *= 0.3; P.squash = -0.2;
+  AUDIO.play('dash');
+  ring(P.x + P.w / 2, P.y + P.h / 2, 6, 28, '#9fffe0', 12, 2);
+}
+function diveImpact() {
+  P.diving = false;
+  const fx = P.x + P.w / 2, fy = P.y + P.h;
+  // debris under the feet and right beside the cell breaks
+  const row = Math.floor((fy + 1) / TILE), body = Math.floor((fy - 4) / TILE);
+  for (let tx = Math.floor((P.x - 8) / TILE); tx <= Math.floor((P.x + P.w + 8) / TILE); tx++) {
+    for (const ty of [row, body]) if (tileAt(tx, ty) === 'B') breakTile(tx, ty);
+  }
+  for (const e of L.ents) {
+    if (!e.alive || !ENEMIES.has(e.type)) continue;
+    const b = enemyBox(e);
+    if (Math.abs(b.x + b.w / 2 - fx) < 76 && Math.abs(b.y + b.h / 2 - (fy - 14)) < 44) killEnemy(e);
+  }
+  ring(fx, fy, 8, 84, '#9fffe0', 22, 4); ring(fx, fy, 4, 50, '#ffffff', 16, 2);
+  burst(fx, fy, rgba(L.def.theme.eps, 0.9), 16, 3.2, 0.1, 30);
+  P.squash = 0.34; G.shake = Math.max(G.shake, 8);
+  AUDIO.play('land'); AUDIO.play('stomp');
 }
 
 // Clone related entities and moving surfaces together to retain ride references.
@@ -86,7 +121,7 @@ function restoreSnapshot(snapshot) {
   Object.assign(L, { fx: [], pops: [], callouts: [], shots: [], combo: 0, comboT: 0, tags: [], bigs: [], flyers: [],
     abWarn: 0, abOn: 0, abExpose: 0, coughing: 0, coughWarn: 0, coughFlash: 0, goalMsgT: 0 });
   L.bumps.clear();
-  L.jiggle.clear(); P.inv = 90; P.dash = 0; P.damageT = 0;
+  L.jiggle.clear(); P.inv = 90; P.dash = 0; P.diving = false; P.damageT = 0;
   for (const k in keys) keys[k] = false;
   G.hitStop = 0; G.shake = 0; G.failReason = '';
 }
@@ -169,8 +204,8 @@ function drawDamageFeedback() {
 
 function drawAbilityHUD() {
   const label = G.strain === 'stk'
-    ? (P.dashCool > 0 ? 'C  DASH · ' + (P.dashCool / 60).toFixed(1) + ' s' : 'C  GROUND DASH READY')
-    : G.strain === 'stp' ? 'HOLD JUMP · GLIDE' : 'SPACE · DOUBLE JUMP';
+    ? (P.dashCool > 0 ? 'C  DASH · ' + (P.dashCool / 60).toFixed(1) + ' s' : P.airDash ? 'C  DASH · land to recharge' : 'C  DASH · ground + air')
+    : G.strain === 'stp' ? 'HOLD JUMP GLIDE · ↓ DIVE' : 'SPACE · DOUBLE JUMP';
   roundRect(14, 58, 184, 30, 10, 'rgba(10,31,43,0.9)');
   text(label, 26, 78, { size: 12, color: '#f3e4b9', weight: '800' });
   if (L.def.name === 'SNpulse') {

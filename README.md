@@ -16,8 +16,8 @@ You are a golden *S. aureus* JE2 cell. Pick one of the three course strains:
 | strain | in the course | in the game |
 |---|---|---|
 | anc | wild type JE2 | agile: full double jump, recharges on landing |
-| stk | stk1::Tn (NTML NE217, Tn at codon 46 of 664) | grounded: no double jump; C gives a short ground dash through debris |
-| stp | stp1::Tn (NTML NE1919, Tn at codon 189 of 247) | drifter: weak, slowly recharging double jump; hold jump to glide for up to 1 s while falling. No Stp1 **and** much less Stk1 (polar effect) |
+| stk | stk1::Tn (NTML NE217, Tn at codon 46 of 664) | dasher: no double jump; C dashes on the ground or once per jump in the air (the cell hangs while it dashes), cutting through enemies, superoxide and debris and slamming into the boss; 0.75 s cooldown |
+| stp | stp1::Tn (NTML NE1919, Tn at codon 189 of 247) | drifter: weak, slowly recharging double jump; hold jump to glide for up to 1.5 s while falling; ↓ in the air dives straight down, smashing enemies on the way, and the landing shockwave defeats nearby enemies and breaks debris (a dive even cracks the closed boss shell). No Stp1 **and** much less Stk1 (polar effect) |
 
 All main routes use fixed platforms and the shared single jump. Strain abilities
 help with speed, exploration and recovery. Movement abilities are game metaphors,
@@ -81,7 +81,8 @@ the intro panel. The results count every replicate you lost (☠).
 ## More ways to play
 
 The title screen lists the four story levels and three more chips; ↑ ↓ moves
-through all of them.
+through all of them. Study plays the story only: the daily challenge and the log
+phase are greyed out until you pick Normal or Hard (the codex stays open).
 
 - **Daily challenge (☀).** The date picks one part of one map, a strain and one
   rule of the day: *Low gravity* (80 % gravity), *Swift cell* (run 25 % faster),
@@ -162,7 +163,8 @@ browser; storage failure never prevents play. Medal targets still need player tu
 
 **Difficulty:** choose one of three main-menu buttons. **Normal** is selected by
 default and keeps the original gameplay and records. **Study** slows the world
-to 55% pace and makes jump timing more forgiving; hits and falls cost no
+(enemies, hazards and their timers, crumbling cells, coughs) to 55% pace while
+your cell still runs and jumps at full speed, and makes jump timing more forgiving; hits and falls cost no
 replicates, the pulse has no deadline, and checkpoint retries have no time
 penalty. **Hard** runs at 115% pace and halves protection after hits, from 1.5 to
 0.75 game seconds. It keeps Normal's pulse deadline and jump timing. Jump arcs,
@@ -230,7 +232,7 @@ Between levels, fact cards show real summary numbers from the course analysis.
 A_vs_B > 0 means higher in A; the text says which group is higher.
 
 Controls: arrows or A/D to move; Space/up/W to jump (press again for a double
-jump as anc/stp); hold jump as stp to glide; C to dash as stk; X/K/Shift to shoot;
+jump as anc/stp); hold jump as stp to glide; ↓ in the air as stp to dive; C to dash as stk (also in the air); X/K/Shift to shoot;
 down to brace against a cough; R to retry; G to toggle your ghost; P/Esc to pause;
 Enter to continue; M for effects and N for music; B for the codex (title);
 T to copy a result, L to copy a race link (results) and I to save a micrograph. Touch screens get movement,
@@ -295,7 +297,8 @@ music falls under the same MIT license as the code.
   "lysed cells" that collapse, ribosome blocks, shooting PSMs (in reality
   *S. aureus* toxins such as PSMs mainly act on host cells, not on
   *P. aeruginosa*), staphyloxanthin as a timed shield, the air bubbles, swollen
-  cells, the glycerol stock checkpoints, the `stk` dash, the `stp` glide,
+  cells, the glycerol stock checkpoints, the `stk` dash (on the ground and in the air)
+  and its dash attack, the `stp` glide and dive,
   the advancing exposure front, mucus and
   cilia as floor types, flow channels as conveyors in the culture levels,
   the daily-challenge rules, the log phase (its generations, 2ⁿ counter and

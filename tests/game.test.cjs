@@ -207,14 +207,26 @@ check('hard runs faster, shortens hit protection and keeps separate records', ()
   reset(1,'anc',150); assert.equal(run('L.timeLimit'),300);
   assert.equal(run('menuItems().length'),7); run('update(); draw();'); assert.equal(run('G.state'),'play');
 });
-check('lower difficulty slows the world while normal mode keeps the original cadence', () => {
+check('lower difficulty slows the world but never the cell; normal keeps the original cadence', () => {
+  const runX = {};
   for (const difficulty of [0,25,50,75,100]) {
     reset(0,'anc',difficulty);
     run('G.studySeen=Object.fromEntries(Object.keys(STUDY_FACTS).map(k=>[k,true])); for(let i=0;i<60;i++) update();');
+    assert.equal(run('L.time'), 60);   // the cell and the clock run in real time
     const expected = Math.floor((0.55 + 0.45 * difficulty / 100) * 60 + 1e-8);
-    assert(Math.abs(run('L.time') - expected) <= 1);
+    assert(Math.abs(run('L.entTicks') - expected) <= 1, 'world steps at difficulty ' + difficulty);
     assert.equal(run('G.state'),'play');
+    // running right on flat ground covers the same distance in every mode
+    reset(0,'anc',difficulty); run('P.x=2*TILE; P.y=26*TILE-P.h; P.vy=0; P.onGround=true; keys.right=true; for(let i=0;i<40;i++) update(); keys.right=false;');
+    runX[difficulty] = run('P.x');
   }
+  for (const d of [0,25,50,75]) assert.equal(runX[d], runX[100]);
+  // a slowed enemy moves less per second, and is drawn between its steps
+  reset(1,'anc',0); run("var la=L.ents.find(e=>e.type==='lasa'); var x0=la.x; P.x=0; P.y=0; for(let i=0;i<60;i++) updatePlay();");
+  const slow = run('Math.abs(la.x - x0)');
+  reset(1,'anc',100); run("var la=L.ents.find(e=>e.type==='lasa'); var x0=la.x; P.x=0; P.y=0; for(let i=0;i<60;i++) updatePlay();");
+  assert(slow < run('Math.abs(la.x - x0)') * 0.7);
+  reset(1,'anc',0); run('for(let i=0;i<7;i++) { updatePlay(); draw(); }');
 });
 check('station notes open only on request, keep movement live and close on departure', () => {
   reset(0,'anc',0);
@@ -231,7 +243,7 @@ check('station notes open only on request, keep movement live and close on depar
   controls['study-close'].handlers.click(); assert.equal(controls['study-panel'].hidden,true);
   run('pressed.biology=true; update();'); assert.equal(controls['study-panel'].hidden,false);
   events.keydown({code:'KeyD',target:controls['study-open'],preventDefault(){}});
-  run('for(let i=0;i<50;i++) update();');
+  run('for(let i=0;i<30;i++) update();   // full speed in Study: 30 frames leave the station');
   assert.equal(controls['study-panel'].hidden,true); assert.equal(controls['study-controls'].hidden,true);
   assert.equal(run('G.state'),'play');
   run('keys.right=false; P.x=readingStation.tx*TILE+4; P.y=readingStation.ty*TILE+4; P.vx=0; syncStudyStation();');

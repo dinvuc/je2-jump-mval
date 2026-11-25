@@ -9,9 +9,14 @@ const storage = new Map(), events = {}, surfaces = [];
 let displayWidth = 960;
 function makeCanvas() {
   const gradient = { addColorStop() {} };
+  // Like a real browser: non-finite numbers and negative radii throw.
+  const finite = (name, args) => assert(args.every(Number.isFinite), name + ' needs finite numbers: ' + args.join(', '));
   const context = new Proxy({
+    createLinearGradient(...a) { finite('createLinearGradient', a); return gradient; },
+    createRadialGradient(...a) { finite('createRadialGradient', a); assert(a[2] >= 0 && a[5] >= 0, 'createRadialGradient radius is negative'); return gradient; },
+    arc(x, y, r) { finite('arc', [x, y, r]); assert(r >= 0, 'arc radius is negative: ' + r); },
+    ellipse(x, y, rx, ry) { finite('ellipse', [x, y, rx, ry]); assert(rx >= 0 && ry >= 0, 'ellipse radius is negative'); },
     measureText: s => ({ width: String(s).length * 7.8 }),
-    createLinearGradient: () => gradient, createRadialGradient: () => gradient,
     setTransform(...args) { this.transform = args; },
     drawImage(...args) {
       assert(args.slice(1).every(Number.isFinite), 'drawImage has finite coordinates');
