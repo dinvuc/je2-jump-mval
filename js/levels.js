@@ -1,8 +1,8 @@
 'use strict';
-// levels_mval.js -- the three media of the experiment as three levels.
+// levels.js -- the three media of the experiment as three levels.
 // Coordinates are in tiles: x = column (0 = left), y = row (0 = top, 16 = bottom).
 // The ground surface is row 14, so things standing on the ground sit in row 13.
-// Jump reach (see game_mval.js): a single jump climbs ~3 tiles and crosses ~4,
+// Jump reach (see game.js): a single jump climbs ~3 tiles and crosses ~4,
 // so the main path never needs more. Higher platforms are double-jump bonuses.
 
 const ROWS = 17;

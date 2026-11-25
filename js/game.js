@@ -1,7 +1,7 @@
 'use strict';
-// game_mval.js -- "JE2 Jump": a small platformer about the Bio253 JE2 proteomics course.
+// game.js -- "JE2 Jump": a small platformer about the Bio253 JE2 proteomics course.
 // Plain JavaScript + <canvas>, no libraries, no build step: open index.html and play.
-// Needs facts_mval.js (STRAINS, LEVEL_FACTS, strainFact) and levels_mval.js (LEVELS, ROWS, GROUND).
+// Needs facts.js (STRAINS, LEVEL_FACTS, strainFact) and levels.js (LEVELS, ROWS, GROUND).
 
 const TILE = 32, VIEW_W = 960, VIEW_H = 544;
 const STEP_MS = 1000 / 60;            // fixed physics step: 60 updates per second
@@ -63,8 +63,8 @@ canvas.addEventListener('pointerdown', e => {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
-function loadBest() { try { return Number(localStorage.getItem('je2jump_best_mval')) || 0; } catch { return 0; } }
-function saveBest(v) { try { localStorage.setItem('je2jump_best_mval', String(v)); } catch { /* private mode */ } }
+function loadBest() { try { return Number(localStorage.getItem('je2jump_best')) || 0; } catch { return 0; } }
+function saveBest(v) { try { localStorage.setItem('je2jump_best', String(v)); } catch { /* private mode */ } }
 
 // ---- game state ------------------------------------------------------------------
 const G = { state: 'title', strain: 'anc', levelIdx: 0, score: 0, results: [], toast: '', toastT: 0, best: loadBest(), seen: {} };

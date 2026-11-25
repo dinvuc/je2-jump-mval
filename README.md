@@ -58,7 +58,7 @@ buttons.
   slow recharge for `stp`, "3 Fe = one replicate", the AhpC shield, the TcyA
   magnet, HQNO slowing you down, and LasA being stompable.
 - **No course data in this repo.** Only a few summary numbers are written
-  into `js/facts_mval.js`. Raw and derived data stay in the course repository
+  into `js/facts.js`. Raw and derived data stay in the course repository
   and are git-ignored there.
 
 ### Background sources for the hazards (please verify before citing)
@@ -74,15 +74,12 @@ buttons.
 ## Files
 
 ```
-index.html            page + canvas
-style_mval.css        page style
-js/facts_mval.js      strains, hit counts, fact cards (course content)
-js/levels_mval.js     the three levels, built with small helper functions
-js/game_mval.js       physics, entities, drawing, state machine
+index.html     page + canvas
+style.css      page style
+js/facts.js    strains, hit counts, fact cards (course content)
+js/levels.js   the three levels, built with small helper functions
+js/game.js     physics, entities, drawing, state machine
 ```
-
-Following our group rule, every file we created ends in `_mval`. Files that
-need a fixed name (`index.html`, `README.md`, `LICENSE`) are the exceptions.
 
 ### Make your own level
 

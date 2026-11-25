@@ -1,5 +1,5 @@
 'use strict';
-// facts_mval.js -- the course content the game shows.
+// facts.js -- the course content the game shows.
 // Only summary numbers and concepts from the course repository are used here,
 // never raw data. Source of every number is given next to it.
 
