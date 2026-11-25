@@ -54,6 +54,14 @@ const LEVEL_FACTS = [
     `${HIT_COUNTS.TSB_vs_SN.up} higher in TSB and ${HIT_COUNTS.TSB_vs_SN.down} higher in SN.`,
     'With n = 3 per group: always plot the raw replicates first!',
   ],
+  // Bonus level: general background, not course data (see README for sources).
+  [
+    'Cystic fibrosis: mutations in CFTR, a chloride channel, leave airway',
+    'mucus thick and dehydrated, so the cilia cannot clear it well.',
+    'S. aureus is common in children with CF; P. aeruginosa becomes',
+    'more common with age, and the two can share the airway.',
+    'Our course experiment used PASN in vitro, not CF samples.',
+  ],
 ];
 
 // Strain-specific line for the final screen.

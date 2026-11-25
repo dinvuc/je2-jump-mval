@@ -16,6 +16,11 @@ const BUFFER = 6;   // frames a jump press is remembered before landing
 const LYSIS_DELAY = 36, LYSIS_DOWN = 240;   // lysed cells: collapse after 0.6 s, back after 4 s
 const PHOS_TIME = 600;                      // phospho-switch stays ON for 10 s
 const PULSE_S = 900;                        // the SNpulse clock shows 15 min
+const SPRING_V = -15.5;                     // swollen-cell bounce (~6 rows)
+const MAX_AMMO = 20;                        // PSM shots you can carry
+const SOLID = new Set(['#', '~', '<', '>', 'B', 'R', 'U']);   // biofilm, mucus, cilia, debris, ribosome (U = used)
+const isSolid = c => SOLID.has(c);
+const ENEMIES = new Set(['lasa', 'omv', 'lasb', 'pa', 'twitch', 'sidero']);
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -28,7 +33,7 @@ const KEYMAP = {
   ArrowUp: ['jump', 'up'], KeyW: ['jump', 'up'], ArrowDown: ['down'], KeyS: ['down'],
   Space: ['jump', 'confirm'], Enter: ['ok', 'confirm'],
   KeyP: ['pause'], Escape: ['pause'], Digit1: ['s1'], Digit2: ['s2'], Digit3: ['s3'],
-  KeyM: ['mute'], KeyN: ['music'],
+  KeyM: ['mute'], KeyN: ['music'], KeyX: ['shoot'], KeyK: ['shoot'], ShiftLeft: ['shoot'], ShiftRight: ['shoot'],
 };
 function press(k) { if (!keys[k]) pressed[k] = true; keys[k] = true; }
 function release(k) { keys[k] = false; }
@@ -102,6 +107,12 @@ const AUDIO = (() => {
     fail: () => arp([392, 330, 262, 196], 0.14, 'triangle', 0.06, 0.2),
     click: () => fx(660, 660, 0.05, 'square', 0.03),
     move: () => fx(440, 440, 0.03, 'square', 0.02),
+    shoot: () => fx(900, 500, 0.08, 'square', 0.03),
+    boing: () => fx(180, 720, 0.22, 'sine', 0.08),
+    warp: () => { fx(700, 120, 0.3, 'triangle', 0.05); fx(1200, 300, 0.25, 'sine', 0.03, 0.05); },
+    ribo: () => arp([392, 523, 784], 0.05, 'square', 0.04, 0.1),
+    breakb: () => { hiss(0.15, 0.08, ac.currentTime, 800, sfxBus); fx(140, 60, 0.12, 'square', 0.04); },
+    peptide: () => arp([659, 880, 1175, 1568], 0.06, 'sine', 0.06, 0.18),
   };
 
   // -- the soundtrack: 8 bars (128 sixteenth steps), chords C Am F G | C Am F G --
@@ -189,6 +200,8 @@ canvas.addEventListener('pointerdown', e => {
   const x = (e.clientX - r.left) * VIEW_W / r.width;
   const y = (e.clientY - r.top) * VIEW_H / r.height;
   if (G.state === 'title') {
+    const lv = levelChips().find(c => x > c.x && x < c.x + c.w && y > c.y && y < c.y + c.h);
+    if (lv) { G.startLevel = lv.i; AUDIO.play('move'); return; }
     const hit = strainCards().find(c => x > c.x && x < c.x + c.w && y > c.y && y < c.y + c.h);
     if (hit) { G.strain = hit.key; AUDIO.play('click'); startGame(); }
   } else if (G.state === 'paused') {
@@ -224,7 +237,7 @@ function mix(h1, h2, t) {
 }
 
 // ---- game state ------------------------------------------------------------------
-const G = { state: 'title', strain: 'anc', levelIdx: 0, score: 0, results: [], toast: '', toastT: 0, best: loadBest(), seen: {}, shake: 0, menuIdx: 0 };
+const G = { state: 'title', strain: 'anc', levelIdx: 0, startLevel: 0, score: 0, results: [], toast: '', toastT: 0, best: loadBest(), seen: {}, shake: 0, menuIdx: 0 };
 let L = null;  // the running level
 let P = null;  // the player
 
@@ -234,9 +247,10 @@ function setState(s) {
   AUDIO.duck(s === 'paused');
 }
 
+// Start at the level picked on the title screen; later levels follow in order.
 function startGame() {
-  G.levelIdx = 0; G.score = 0; G.results = []; G.seen = {};
-  loadLevel(0);
+  G.levelIdx = G.startLevel; G.score = 0; G.results = []; G.seen = {};
+  loadLevel(G.levelIdx);
   setState('intro');
 }
 
@@ -244,14 +258,15 @@ function loadLevel(i) {
   const def = LEVELS[i];
   const b = def.build();
   L = {
-    def, cols: b.cols, rows: b.rows, grid: b.grid, signs: b.signs,
+    def, cols: b.cols, rows: b.rows, grid: b.grid, signs: b.signs, ribo: b.ribo,
     ents: b.ents.map(e => ({ ...e, x: e.tx * TILE, y: e.ty * TILE, alive: true, t: 0 })),
     time: 0, cam: 0, camY: 0, cystine: 0, ironBank: 0, ironTotal: 0, points: 0, goalMsgT: 0,
-    fx: [], pops: [], movers: [], blocks: [], lysis: new Map(), chan: {}, solids: [], plats: [],
-    combo: 0, comboT: 0,
+    fx: [], pops: [], movers: [], blocks: [], shots: [], lysis: new Map(), chan: {}, solids: [], plats: [],
+    combo: 0, comboT: 0, kills: 0, peptides: 0, gateOpened: false,
     art: buildLevelArt(b, def.theme, i),
   };
   L.totalCys = L.ents.filter(e => e.type === 'cystine').length;
+  L.totalPep = L.ents.filter(e => e.type === 'peptide').length;
   for (const e of L.ents) initEntity(e);
   for (const e of L.ents) if (e.ch && (e.type === 'gate' || e.type === 'shuttle')) {
     const src = L.ents.find(o => (o.type === 'agrc' || o.type === 'phos') && o.ch === e.ch);
@@ -263,6 +278,7 @@ function loadLevel(i) {
     x: L.respawn.x, y: L.respawn.y, w: 24, h: 28, vx: 0, vy: 0,
     onGround: false, coyote: 0, buffer: 0, djReady: true, groundT: 0,
     face: 1, inv: 0, slow: 0, shield: 0, magnet: 0, phos: 0, reps: 3, squash: 0, ride: null, roll: 0,
+    ammo: 0, gold: 0, shootCool: 0, sticky: 0, belt: 0, sprung: false,
   };
   G.toast = ''; G.toastT = 0; G.failReason = ''; G.shake = 0;
   L.solids = dynSolids();
@@ -284,6 +300,10 @@ function initEntity(e) {
     case 'agrb': e.cool = 0; e.block = { x: e.x + TILE, y: e.y, w: TILE, h: TILE, vy: 0, home: e, docked: false, block: true }; L.blocks.push(e.block); break;
     case 'agrc': e.on = false; break;
     case 'phos': e.timer = 0; break;
+    case 'omv': e.vx = 1.2; e.vy = 0; break;
+    case 'lasb': case 'pa': e.hx = e.x + 16; e.hy = e.y + 16; e.cx = e.hx; e.cy = e.hy; e.ang = 0; break;
+    case 'twitch': e.dir = -1; break;
+    case 'channel': case 'spring': e.cool = 0; e.sq = 0; break;
   }
 }
 
@@ -334,10 +354,10 @@ function moveX() {
   const top = Math.floor(P.y / TILE), bot = Math.floor((P.y + P.h - 1) / TILE);
   if (P.vx > 0) {
     const tx = Math.floor((P.x + P.w - 1) / TILE);
-    for (let ty = top; ty <= bot; ty++) if (tileAt(tx, ty) === '#') { P.x = tx * TILE - P.w; P.vx = 0; break; }
+    for (let ty = top; ty <= bot; ty++) if (isSolid(tileAt(tx, ty))) { P.x = tx * TILE - P.w; P.vx = 0; break; }
   } else if (P.vx < 0) {
     const tx = Math.floor(P.x / TILE);
-    for (let ty = top; ty <= bot; ty++) if (tileAt(tx, ty) === '#') { P.x = (tx + 1) * TILE; P.vx = 0; break; }
+    for (let ty = top; ty <= bot; ty++) if (isSolid(tileAt(tx, ty))) { P.x = (tx + 1) * TILE; P.vx = 0; break; }
   }
   for (const r of L.solids) {
     if (!overlap(P, r) || P.y + P.h <= r.y + 6) continue;   // standing on top is moveY's job
@@ -364,17 +384,20 @@ function moveY() {
     if (prevBottom <= R * TILE + 0.5) {
       for (let tx = left; tx <= right; tx++) {
         const c = tileAt(tx, R);
-        if (c === '#' || oneWay(c)) { P.y = R * TILE - P.h; P.vy = 0; P.onGround = true; break; }
+        if (isSolid(c) || oneWay(c)) { P.y = R * TILE - P.h; P.vy = 0; P.onGround = true; break; }
       }
     }
     // b) solid tiles we have sunk into
     if (!P.onGround) {
       const ty = Math.floor((P.y + P.h - 1) / TILE);
-      for (let tx = left; tx <= right; tx++) if (tileAt(tx, ty) === '#') { P.y = ty * TILE - P.h; P.vy = 0; P.onGround = true; break; }
+      for (let tx = left; tx <= right; tx++) if (isSolid(tileAt(tx, ty))) { P.y = ty * TILE - P.h; P.vy = 0; P.onGround = true; break; }
     }
   } else if (P.vy < 0) {
-    const ty = Math.floor(P.y / TILE);
-    for (let tx = left; tx <= right; tx++) if (tileAt(tx, ty) === '#') { P.y = (ty + 1) * TILE; P.vy = 0; break; }
+    // head bump: the tile above your centre counts first (ribosome / debris blocks)
+    const ty = Math.floor(P.y / TILE), mid = Math.floor((P.x + P.w / 2) / TILE);
+    let hit = isSolid(tileAt(mid, ty)) ? mid : -1;
+    if (hit < 0) for (let tx = left; tx <= right; tx++) if (isSolid(tileAt(tx, ty))) { hit = tx; break; }
+    if (hit >= 0) { P.y = (ty + 1) * TILE; P.vy = 0; bumpTile(hit, ty); }
   }
   // Moving platforms (air bubbles, bridges): one-way, they carry you. They can
   // also lift you off the floor when they rise through your feet.
@@ -399,6 +422,95 @@ function inFoam() {
       if (tileAt(tx, ty) === '^' && overlap(P, { x: tx * TILE + 4, y: ty * TILE + 14, w: TILE - 8, h: TILE - 14 })) return true;
   return false;
 }
+
+// ---- blocks you bump from below: ribosomes make a protein, debris breaks ---------
+function breakTile(tx, ty) {
+  L.grid[ty][tx] = ' ';
+  const col = L.def.theme.debris === 'mucus' ? '#c7d36a' : '#a08f78';
+  burst(tx * TILE + 16, ty * TILE + 16, col, 14, 3.2, 0.15, 34);
+  L.points += 20; G.shake = Math.max(G.shake, 3);
+  AUDIO.play('breakb');
+}
+function bumpTile(tx, ty) {
+  const c = tileAt(tx, ty);
+  if (c === 'B') breakTile(tx, ty);
+  else if (c === 'R') {
+    L.grid[ty][tx] = 'U';
+    const item = L.ribo[`${tx},${ty}`] || 'psm';
+    L.ents.push({ type: item, tx, ty: ty - 1, x: tx * TILE, y: ty * TILE, alive: true, t: 0, pop: TILE, fromRibo: true, vx: (P.face || 1) * 1.3, vy: 0 });
+    burst(tx * TILE + 16, ty * TILE, '#ffe9a8', 10, 2.2);
+    AUDIO.play('ribo');
+    once('ribo', 'The ribosome translated an mRNA: a new protein pops out!');
+  } else AUDIO.play('move');
+}
+
+// ---- PSM shots ------------------------------------------------------------------
+function shoot() {
+  P.ammo--; P.shootCool = 12;
+  L.shots.push({ x: P.x + P.w / 2 + P.face * 12, y: P.y + 12, vx: P.face * 6.5 + P.vx * 0.3, vy: -2, life: 100, bounces: 0 });
+  AUDIO.play('shoot');
+}
+function updateShots() {
+  for (const s of L.shots) {
+    s.life--;
+    s.vy = Math.min(s.vy + 0.35, 9);
+    s.x += s.vx;
+    const fx = Math.floor((s.x + Math.sign(s.vx) * 5) / TILE), fy = Math.floor(s.y / TILE), c = tileAt(fx, fy);
+    if (isSolid(c)) { if (c === 'B') breakTile(fx, fy); s.life = 0; }
+    if (L.solids.some(r => !r.block && s.x > r.x && s.x < r.x + r.w && s.y > r.y && s.y < r.y + r.h)) s.life = 0;
+    s.y += s.vy;
+    const by = Math.floor((s.y + 5) / TILE), bc = tileAt(Math.floor(s.x / TILE), by);
+    if (s.vy > 0 && (isSolid(bc) || oneWay(bc)) && s.y + 5 - s.vy <= by * TILE + 1) {
+      s.y = by * TILE - 5; s.vy = -4.6;
+      if (++s.bounces > 3) s.life = 0;
+    }
+    if (s.life > 0) for (const e of L.ents) {
+      if (!e.alive || !ENEMIES.has(e.type)) continue;
+      const b = enemyBox(e);
+      if (s.x > b.x - 5 && s.x < b.x + b.w + 5 && s.y > b.y - 5 && s.y < b.y + b.h + 5) { killEnemy(e); s.life = 0; break; }
+    }
+    if (s.life <= 0) burst(s.x, s.y, '#e88ad0', 6, 1.8, 0.05, 16);
+  }
+  if (L.shots.length) L.shots = L.shots.filter(s => s.life > 0);
+}
+
+// ---- enemies: hit boxes, stomping, neutralising ------------------------------------
+function enemyBox(e) {
+  switch (e.type) {
+    case 'lasa': return { x: e.x, y: e.y, w: e.w, h: e.h };
+    case 'omv': return { x: e.x + 5, y: e.y + 5, w: 22, h: 22 };
+    case 'twitch': return { x: e.x + 2, y: e.y + 17, w: 28, h: 15 };
+    case 'sidero': return { x: e.cx - 12, y: e.cy - 12, w: 24, h: 24 };
+    default: return { x: e.cx - 13, y: e.cy - 9, w: 26, h: 18 };   // lasb, pa
+  }
+}
+const ENEMY_COL = { lasa: '#b8404c', omv: '#8fb6e8', lasb: '#2f8f86', pa: '#5fae4f', twitch: '#5fae4f', sidero: '#c8e85a' };
+function killEnemy(e) {
+  const b = enemyBox(e);
+  e.alive = false; L.kills++;
+  gain(200, b.x + b.w / 2, b.y, '#ff8a96');
+  burst(b.x + b.w / 2, b.y + b.h / 2, ENEMY_COL[e.type] || '#b8404c', 16, 3.2);
+  G.shake = Math.max(G.shake, 5); AUDIO.play('stomp');
+}
+function enemyContact(e, msg) {
+  const b = enemyBox(e);
+  if (!overlap(P, b)) return;
+  if (P.vy > 0 && P.y + P.h - P.vy <= b.y + 8) { killEnemy(e); P.vy = JUMP_V * 0.7; P.sprung = false; }
+  else hurt('enemy', msg);
+}
+
+// ---- level goals -------------------------------------------------------------------
+function goalStatus(g) {
+  switch (g.id) {
+    case 'gate': return { done: L.gateOpened, text: g.label };
+    case 'cys': return { done: L.cystine >= g.n, text: `${g.label} (${Math.min(L.cystine, g.n)}/${g.n})` };
+    case 'pep': return { done: L.peptides >= L.totalPep, text: `${g.label} (${L.peptides}/${L.totalPep})` };
+    case 'reps': return { done: P.reps === 3, text: g.label };
+    case 'kills': return { done: L.kills >= g.n, text: `${g.label} (${Math.min(L.kills, g.n)}/${g.n})` };
+    default: return { done: true, text: g.label };   // 'time': the pulse clock checks it
+  }
+}
+const missingGoals = () => L.def.goals.filter(g => g.req && !goalStatus(g).done);
 
 // ---- lysed cells: collapse shortly after you land on them -------------------------
 function touchLysis() {
@@ -432,7 +544,7 @@ function pushBlock(b, d) {
   b.x += d;
   const top = Math.floor(b.y / TILE), bot = Math.floor((b.y + b.h - 1) / TILE);
   const tx = Math.floor((d > 0 ? b.x + b.w - 1 : b.x) / TILE);
-  for (let ty = top; ty <= bot; ty++) if (tileAt(tx, ty) === '#') { b.x = d > 0 ? tx * TILE - b.w : (tx + 1) * TILE; break; }
+  for (let ty = top; ty <= bot; ty++) if (isSolid(tileAt(tx, ty))) { b.x = d > 0 ? tx * TILE - b.w : (tx + 1) * TILE; break; }
   for (const r of L.solids) if (r !== b && overlap(b, r)) b.x = d > 0 ? r.x - b.w : r.x + r.w;
 }
 function resetBlock(b) {
@@ -444,7 +556,7 @@ function updateBlocks() {
     if (b.docked) continue;
     const col = Math.floor((b.x + b.w / 2) / TILE);
     const below = tileAt(col, Math.round((b.y + b.h) / TILE));
-    const resting = b.vy === 0 && Math.abs((b.y + b.h) % TILE) < 0.01 && (below === '#' || oneWay(below));
+    const resting = b.vy === 0 && Math.abs((b.y + b.h) % TILE) < 0.01 && (isSolid(below) || oneWay(below));
     if (resting) continue;
     if (b.vy === 0) b.x = col * TILE;   // tips into the column under its centre (e.g. a receptor notch)
     b.vy = Math.min(b.vy + GRAV, MAX_FALL);
@@ -452,11 +564,11 @@ function updateBlocks() {
     b.y += b.vy;
     for (let R = Math.ceil(prevB / TILE - 1e-6); R * TILE <= b.y + b.h; R++) {
       const c = tileAt(col, R);
-      if (c === '#' || oneWay(c)) {
+      if (isSolid(c) || oneWay(c)) {
         b.y = R * TILE - b.h; b.vy = 0;
         const rec = L.ents.find(e => e.type === 'agrc' && e.tx === col && e.ty === R - 1);
         if (rec && !rec.on) {
-          b.docked = true; rec.on = true; rec.block = b;
+          b.docked = true; rec.on = true; rec.block = b; L.gateOpened = true;
           burst(b.x + 16, b.y + 16, '#7be08f', 18, 3);
           once('agrc', 'AIP bound to its receptor AgrC: the signal is ON!');
         }
@@ -469,6 +581,7 @@ function updateBlocks() {
 function signalOn(ch) {
   AUDIO.play('signal');
   const src = L.ents.find(o => (o.type === 'agrc' || o.type === 'phos') && o.ch === ch);
+  for (const t of L.ents) if (t.ch === ch && t.type === 'shuttle') t.wait = Math.max(t.wait, 50);   // time to step on
   for (const t of L.ents) if (t.ch === ch && (t.type === 'gate' || t.type === 'shuttle') && src) {
     const sx = src.x + 16, sy = src.y + 16, tx = t.x + 16, ty = t.y + 16;
     for (let i = 0; i < 16; i++) {
@@ -523,7 +636,7 @@ function updateMovers() {
     b.dy = b.t < 12 ? -0.4 : -1.3;
     b.y += b.dy;
     b.top = b.y - b.r + 4; b.pl = b.x - b.r; b.pr = b.x + b.r;
-    const roof = tileAt(Math.floor(b.x / TILE), Math.floor((b.y - b.r - 34) / TILE)) === '#';
+    const roof = isSolid(tileAt(Math.floor(b.x / TILE), Math.floor((b.y - b.r - 34) / TILE)));
     if (b.y <= b.topY || roof) {
       b.alive = false;
       burst(b.x, b.y, 'rgba(255,255,255,0.9)', 10, 2.4, 0.02, 24);
@@ -564,6 +677,11 @@ function loseReplicate(msg) {
 }
 function hurt(kind, msg) {
   if (P.inv > 0) return;
+  if (kind === 'ros' && P.gold > 0) {   // staphyloxanthin: an antioxidant pigment
+    burst(P.x + P.w / 2, P.y + P.h / 2, '#ffd84a', 8, 2.4);
+    L.points += 20;
+    return;
+  }
   if (kind === 'ros' && P.shield > 0) {
     P.shield = 0; P.inv = 40;
     burst(P.x + P.w / 2, P.y + P.h / 2, '#7fb6ff', 14, 3);
@@ -609,8 +727,9 @@ function updatePlay() {
     }
   }
 
-  // Run. HQNO ("slow") lowers top speed and jump power.
-  const slowF = P.slow > 0 ? 0.55 : 1;
+  // Run. HQNO ("slow") and sticky mucus lower top speed and jump power.
+  const slowF = (P.slow > 0 ? 0.55 : 1) * (P.sticky ? 0.45 : 1);
+  const jumpF = (P.slow > 0 ? 0.85 : 1) * (P.sticky ? 0.8 : 1);
   const dir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
   if (dir) { P.vx += dir * RUN_ACC; P.face = dir; } else P.vx *= FRICTION;
   P.vx = clamp(P.vx, -RUN_MAX * slowF, RUN_MAX * slowF);
@@ -625,11 +744,11 @@ function updatePlay() {
 
   if (P.buffer > 0) {
     if (P.coyote > 0) {
-      P.vy = JUMP_V * (P.slow > 0 ? 0.85 : 1);
+      P.vy = JUMP_V * jumpF;
       P.coyote = 0; P.buffer = 0; P.squash = -0.22; P.ride = null;
       AUDIO.play('jump');
     } else if (S.doubleJump > 0 && P.djReady) {
-      P.vy = JUMP_V * S.doubleJump * (P.slow > 0 ? 0.85 : 1);
+      P.vy = JUMP_V * S.doubleJump * jumpF; P.sprung = false;
       P.djReady = false; P.buffer = 0; P.phos = 30; P.squash = -0.18;   // little "P" badge = phosphorylated
       burst(P.x + P.w / 2, P.y + P.h, '#b98ae6', 8, 2, 0.05, 22);
       AUDIO.play('dj');
@@ -637,8 +756,19 @@ function updatePlay() {
       once('nodj', 'stk: no Stk1 kinase, so no double jump. Time your jumps!');
     }
   }
-  if (!keys.jump && P.vy < -3.5) P.vy = -3.5;      // let go early = lower jump
+  if (!keys.jump && !P.sprung && P.vy < -3.5) P.vy = -3.5;   // let go early = lower jump (not after a bounce)
   P.vy = Math.min(P.vy + GRAV, MAX_FALL);
+  if (P.vy >= 0) P.sprung = false;
+
+  // Shoot PSMs.
+  if (P.shootCool > 0) P.shootCool--;
+  if (took('shoot')) {
+    if (P.ammo > 0 && P.shootCool === 0) shoot();
+    else if (P.ammo === 0) once('noammo', 'No PSMs left. Jump into a ribosome block from below to make more.');
+  }
+
+  // Cilia beat and carry you along.
+  if (P.belt && P.onGround) { const v = P.vx; P.vx = P.belt; moveX(); P.vx = v; }
 
   const wasGround = P.onGround, fallV = P.vy;
   moveX();
@@ -653,8 +783,16 @@ function updatePlay() {
     burst(P.x + P.w / 2 - P.face * 8, P.y + P.h - 2, rgba(L.def.theme.eps, 0.8), 1, 0.6, -0.03, 20);
   }
   touchLysis();
+  // What are you standing on? Mucus is sticky, cilia push.
+  P.sticky = 0; P.belt = 0;
+  if (P.onGround && !P.ride) {
+    const c = tileAt(Math.floor((P.x + P.w / 2) / TILE), Math.floor((P.y + P.h + 1) / TILE));
+    if (c === '~') { P.sticky = 1; once('mucus', 'Thick CF mucus: you are slow and cannot jump as high.'); }
+    else if (c === '<') P.belt = -1.5;
+    else if (c === '>') P.belt = 1.5;
+  }
 
-  for (const t of ['inv', 'slow', 'shield', 'magnet', 'phos']) if (P[t] > 0) P[t]--;
+  for (const t of ['inv', 'slow', 'shield', 'magnet', 'phos', 'gold']) if (P[t] > 0) P[t]--;
 
   if (inFoam()) hurt('foam', 'Rhamnolipid foam damaged your membrane.');
   if (G.state !== 'play') return;
@@ -667,8 +805,10 @@ function updatePlay() {
   }
 
   updateEntities();
+  updateShots();
   updateFx();
   followCamera();
+  pressed.down = false; pressed.up = false;   // ↓ only counts while standing on a channel
   if (G.toastT > 0) G.toastT--;
   if (L.goalMsgT > 0) L.goalMsgT--;
   if (L.comboT > 0) L.comboT--;
@@ -682,8 +822,110 @@ function updateEntities() {
     if (G.state !== 'play') break;   // level ended (finished or n = 0) during this loop
     if (!e.alive) continue;
     e.t++;
+    if (e.pop > 0) { e.y -= 2; e.pop -= 2; }     // a protein coming out of a ribosome block...
+    else if (e.fromRibo) {                         // ...then it slides off and drops to the floor
+      const nx = e.x + e.vx, fy = Math.floor((e.y + 16) / TILE);
+      if (isSolid(tileAt(Math.floor((e.vx > 0 ? nx + 28 : nx + 4) / TILE), fy))) e.vx = -e.vx; else e.x = nx;
+      e.vy = Math.min(e.vy + 0.3, 7);
+      const prevB = e.y + TILE; e.y += e.vy;
+      const R = Math.floor((e.y + TILE) / TILE), c = tileAt(Math.floor((e.x + 16) / TILE), R);
+      if (e.vy > 0 && (isSolid(c) || oneWay(c)) && prevB <= R * TILE + 1) { e.y = R * TILE - TILE; e.vy = 0; }
+      if (e.y > L.rows * TILE) e.alive = false;
+    }
     const cx = e.x + 16, cy = e.y + 16;
     switch (e.type) {
+      case 'peptide':
+        if (dist(cx, cy, pcx, pcy) < 24) {
+          e.alive = false; L.peptides++;
+          gain(300, cx, cy, '#9fe7ff');
+          burst(cx, cy, '#9fe7ff', 18, 3);
+          AUDIO.play('peptide');
+          toast(`Tryptic peptide ${L.peptides}/${L.totalPep} found! The MS identifies proteins from peptides like this.`, 170);
+        }
+        break;
+      case 'psm':
+        if (dist(cx, cy, pcx, pcy) < 26) {
+          e.alive = false; P.ammo = Math.min(MAX_AMMO, P.ammo + 12);
+          burst(cx, cy, '#e88ad0', 14, 3); AUDIO.play('power');
+          toast('PSMs (phenol-soluble modulins), small peptide toxins of S. aureus: press X, K or Shift to shoot them.', 220);
+        }
+        break;
+      case 'xan':
+        if (dist(cx, cy, pcx, pcy) < 26) {
+          e.alive = false; P.gold = 60 * 12;
+          burst(cx, cy, '#ffd84a', 18, 3.4); AUDIO.play('power');
+          toast('Staphyloxanthin: the golden carotenoid of S. aureus is an antioxidant. ROS cannot hurt you for 12 s.', 220);
+        }
+        break;
+      case 'spring': // a swollen cell: land on it and it throws you up
+        if (e.sq > 0) e.sq--;
+        if (P.vy >= 0 && Math.abs(pcx - cx) < 20 && P.y + P.h >= e.y + 14 && P.y + P.h <= e.y + TILE + 0.5) {
+          P.y = e.y + 14 - P.h; P.vy = SPRING_V; P.onGround = false; P.coyote = 0; P.ride = null; P.sprung = true;
+          P.squash = -0.3; e.sq = 14;
+          AUDIO.play('boing');
+          once('spring', 'Boing! A swollen cell throws you up.');
+        }
+        break;
+      case 'channel': { // a water channel through the biofilm: ↓ dives in, you come out at its partner
+        if (e.cool > 0) e.cool--;
+        e.near = P.onGround && Math.abs(pcx - cx) < 16 && Math.abs(P.y + P.h - (e.y + TILE)) < 3;
+        if (e.near && e.cool === 0 && took('down')) {
+          const to = L.ents.find(o => o.type === 'channel' && o.id === e.id && o !== e);
+          if (to) {
+            burst(pcx, pcy, '#9fd8ff', 14, 2.4, -0.03);
+            P.x = to.x + 4; P.y = to.y + 4; P.vx = 0; P.vy = 0; P.ride = null;
+            e.cool = to.cool = 30;
+            burst(P.x + P.w / 2, P.y + P.h / 2, '#9fd8ff', 14, 2.4, -0.03);
+            snapCamera(); AUDIO.play('warp');
+          }
+        }
+        break;
+      }
+      case 'omv': { // outer membrane vesicle: bounces along
+        e.vy = Math.min(e.vy + 0.35, 9);
+        const nx = e.x + e.vx;
+        if (isSolid(tileAt(Math.floor((e.vx > 0 ? nx + 27 : nx + 5) / TILE), Math.floor((e.y + 16) / TILE)))) e.vx = -e.vx; else e.x = nx;
+        const prevB = e.y + 27;
+        e.y += e.vy;
+        const col = Math.floor((e.x + 16) / TILE), R = Math.floor((e.y + 27) / TILE), c = tileAt(col, R);
+        if (e.vy > 0 && (isSolid(c) || oneWay(c)) && prevB <= R * TILE + 1) { e.y = R * TILE - 27; e.vy = -7.2; }
+        if (e.vy < 0 && isSolid(tileAt(col, Math.floor((e.y + 5) / TILE)))) e.vy = 1;
+        if (e.y > L.rows * TILE) e.alive = false;
+        enemyContact(e, 'An outer membrane vesicle (OMV) of P. aeruginosa delivered its cargo into you.');
+        break;
+      }
+      case 'lasb': // LasB elastase: a protease that drifts in loops
+        e.cx = e.hx + Math.sin(e.t * 0.018) * 90; e.cy = e.hy + Math.sin(e.t * 0.045) * 24;
+        e.face = Math.cos(e.t * 0.018) >= 0 ? 1 : -1;
+        enemyContact(e, 'LasB elastase, another P. aeruginosa protease, hit you.');
+        break;
+      case 'hcn': { // a vent that puffs hydrogen cyanide now and then
+        const ph = e.t % 260;
+        e.warn = ph > 140 && ph <= 170; e.active = ph > 170;
+        if (e.active && overlap(P, { x: e.x - 18, y: e.y - 60, w: 68, h: 92 })) hurt('hcn', 'HCN (hydrogen cyanide) blocked your respiration.');
+        break;
+      }
+      case 'pa': { // a living P. aeruginosa cell (CF level only): swims towards you
+        const d = dist(pcx, pcy, e.cx, e.cy);
+        let tx = e.hx + Math.sin(e.t * 0.02) * 50, ty = e.hy + Math.cos(e.t * 0.03) * 20;
+        if (d < 260) { tx = pcx; ty = pcy; }
+        const hd = dist(tx, ty, e.hx, e.hy);
+        if (hd > 150) { tx = e.hx + (tx - e.hx) / hd * 150; ty = e.hy + (ty - e.hy) / hd * 150; }
+        const dd = dist(tx, ty, e.cx, e.cy), sp = d < 260 ? 1.0 : 0.6;
+        if (dd > 1) { e.cx += (tx - e.cx) / dd * sp; e.cy += (ty - e.cy) / dd * sp; e.ang = Math.atan2(ty - e.cy, tx - e.cx); }
+        enemyContact(e, 'A P. aeruginosa cell attacked you.');
+        break;
+      }
+      case 'twitch': { // P. aeruginosa crawling with its pili (CF level only): jerky moves
+        if (e.t % 50 < 16) {
+          const nx = e.x + e.dir * 2.6, front = e.dir > 0 ? nx + 30 : nx + 2;
+          const ftx = Math.floor(front / TILE), fty = Math.floor((e.y + 31) / TILE);
+          const ahead = tileAt(ftx, fty), below = tileAt(ftx, fty + 1);
+          if (isSolid(ahead) || ahead === '^' || !(isSolid(below) || oneWay(below))) e.dir = -e.dir; else e.x = nx;
+        }
+        enemyContact(e, 'A twitching P. aeruginosa cell pulled itself into you.');
+        break;
+      }
       case 'cystine':
         if (P.magnet > 0 && dist(cx, cy, pcx, pcy) < 170) {
           const d = dist(cx, cy, pcx, pcy) || 1;
@@ -726,9 +968,10 @@ function updateEntities() {
       case 'goal': {
         const box = { x: e.x, y: e.y - TILE, w: TILE * 2, h: TILE * 2 };
         if (overlap(P, box)) {
-          if (L.cystine >= L.def.need) finishLevel();
+          const miss = missingGoals();
+          if (!miss.length) finishLevel();
           else if (L.goalMsgT === 0) {
-            toast(`The MS needs ${L.def.need - L.cystine} more cystine. PASN is nutrient-poor: search harder!`);
+            toast(`${L.def.goalKind === 'sputum' ? 'The sample' : 'The MS'} is not ready yet. Still to do: ${miss.map(g => goalStatus(g).text).join(' · ')}`, 220);
             L.goalMsgT = 180;
           }
         }
@@ -789,17 +1032,8 @@ function updateEntities() {
         const front = e.vx < 0 ? nx : nx + e.w;
         const ftx = Math.floor(front / TILE), fty = Math.floor((e.y + e.h - 1) / TILE);
         const ahead = tileAt(ftx, fty), below = tileAt(ftx, fty + 1);
-        if (ahead === '#' || ahead === '^' || below === ' ' || below === '^') e.vx = -e.vx; else e.x = nx;
-        if (overlap(P, e)) {
-          const prevBottom = P.y + P.h - P.vy;
-          if (P.vy > 0 && prevBottom <= e.y + 8) {
-            e.alive = false; P.vy = JUMP_V * 0.7;
-            gain(200, ex, ey, '#ff8a96');
-            burst(ex, ey, '#b8404c', 16, 3.2);
-            G.shake = 6; AUDIO.play('stomp');
-            toast('LasA neutralised!', 90);
-          } else hurt('lasa', 'LasA protease cut into your cell wall.');
-        }
+        if (isSolid(ahead) || ahead === '^' || !(isSolid(below) || oneWay(below))) e.vx = -e.vx; else e.x = nx;
+        enemyContact(e, 'LasA protease cut into your cell wall.');
         break;
       }
       case 'sidero': {
@@ -841,10 +1075,12 @@ function finishLevel() {
   const timeBonus = L.def.timeLimit ? Math.max(0, Math.round((L.def.timeLimit - L.time / 60) * 20)) : 0;
   const repBonus = P.reps * 500;
   const total = L.points + timeBonus + repBonus;
-  // Three stars: sample measured, all 3 replicates kept, at least 80 % of the cystine.
-  const stars = [true, P.reps === 3, L.cystine >= Math.ceil(L.totalCys * 0.8)];
+  // Stars: one for finishing, one for each bonus goal of the level.
+  const bonus = L.def.goals.filter(g => !g.req);
+  const stars = [true, ...bonus.map(g => goalStatus(g).done)];
+  const starLabels = [L.def.goalKind === 'sputum' ? 'sample delivered' : 'sample measured', ...bonus.map(g => g.short)];
   G.score += total;
-  G.results[G.levelIdx] = { name: L.def.name, points: L.points, timeBonus, repBonus, total, cystine: L.cystine, totalCys: L.totalCys, iron: L.ironTotal, reps: P.reps, secs: L.time / 60, stars };
+  G.results[G.levelIdx] = { name: L.def.name, points: L.points, timeBonus, repBonus, total, cystine: L.cystine, totalCys: L.totalCys, iron: L.ironTotal, reps: P.reps, secs: L.time / 60, stars, starLabels, kills: L.kills, peptides: L.peptides, totalPep: L.totalPep };
   setState('levelDone');
   AUDIO.play('done');
 }
@@ -861,7 +1097,7 @@ function menuSelect() {
     case 1: loadLevel(G.levelIdx); setState('intro'); break;
     case 2: AUDIO.toggleSfx(); break;
     case 3: AUDIO.toggleMusic(); break;
-    case 4: setState('title'); break;
+    case 4: G.startLevel = G.levelIdx; setState('title'); break;
   }
 }
 
@@ -877,7 +1113,9 @@ function update() {
       if (took('s3')) G.strain = 'stp';
       if (took('left')) { G.strain = order[(order.indexOf(G.strain) + 2) % 3]; AUDIO.play('move'); }
       if (took('right')) { G.strain = order[(order.indexOf(G.strain) + 1) % 3]; AUDIO.play('move'); }
-      if (took('ok') || took('jump')) { AUDIO.play('click'); startGame(); }
+      if (took('up')) { G.startLevel = (G.startLevel + LEVELS.length - 1) % LEVELS.length; AUDIO.play('move'); }
+      if (took('down')) { G.startLevel = (G.startLevel + 1) % LEVELS.length; AUDIO.play('move'); }
+      if (took('confirm')) { AUDIO.play('click'); startGame(); }
       break;
     }
     case 'intro':
@@ -905,7 +1143,7 @@ function update() {
       }
       break;
     case 'gameOver':
-      if (took('pause')) { setState('title'); break; }
+      if (took('pause')) { G.startLevel = G.levelIdx; setState('title'); break; }
       if (took('ok') || took('jump')) { G.failReason = ''; loadLevel(G.levelIdx); setState('intro'); }
       break;
     case 'win':
@@ -926,6 +1164,16 @@ function buildLevelArt(b, th, seed) {
   const tiles = document.createElement('canvas');
   tiles.width = W; tiles.height = H;
   const g = tiles.getContext('2d');
+
+  // 0) tunnels carved into the biofilm get a dark cave wall behind them
+  if (b.bg) for (let y = 0; y < b.rows; y++) for (let x = 0; x < b.cols; x++) {
+    if (b.bg[y][x] !== 'c') continue;
+    g.fillStyle = rgba(th.matrix[1], 0.88); g.fillRect(x * TILE, y * TILE, TILE, TILE);
+    for (let k = 0; k < 2; k++) {
+      g.fillStyle = rgba(th.cells[k % th.cells.length], 0.13);
+      g.beginPath(); g.arc(x * TILE + 4 + rnd() * 24, y * TILE + 4 + rnd() * 24, 5 + rnd() * 4, 0, TAU); g.fill();
+    }
+  }
 
   // 1) matrix body, darker with depth
   g.save();
@@ -1198,7 +1446,7 @@ function surfaceBelow(px, py) {
   const tx = Math.floor(px / TILE), r0 = Math.floor(py / TILE);
   for (let ty = r0; ty < Math.min(L.rows, r0 + 9); ty++) {
     const c = tileAt(tx, ty);
-    if (c === '#' || oneWay(c)) return ty * TILE;
+    if (isSolid(c) || oneWay(c)) return ty * TILE;
   }
   return null;
 }
@@ -1229,6 +1477,65 @@ function visibleTiles(cx, cy, fn) {
   const c0 = Math.max(0, Math.floor(cx / TILE)), c1 = Math.min(L.cols - 1, Math.floor((cx + VIEW_W) / TILE));
   const r0 = Math.max(0, Math.floor(cy / TILE)), r1 = Math.min(L.rows - 1, Math.floor((cy + VIEW_H) / TILE));
   for (let ty = r0; ty <= r1; ty++) for (let tx = c0; tx <= c1; tx++) fn(L.grid[ty][tx], tx, ty);
+}
+
+// Tiles that change or move: ribosome blocks, debris / mucus plugs, mucus, cilia.
+function drawSpecialTiles(cx, cy) {
+  const t = L.time, mucusStyle = L.def.theme.debris === 'mucus';
+  visibleTiles(cx, cy, (c, tx, ty) => {
+    const X = tx * TILE, Y = ty * TILE;
+    if (c === 'R' || c === 'U') { // ribosome: large + small subunit on an mRNA
+      const used = c === 'U';
+      if (!used) glow(X + 16, Y + 16, 26 + Math.sin(t * 0.1) * 3, '#ffd66a', 0.35);
+      const g = ctx.createLinearGradient(X, Y, X, Y + TILE);
+      g.addColorStop(0, used ? '#b9bcc2' : '#fff1c4'); g.addColorStop(1, used ? '#8b8f96' : '#e9b44c');
+      roundRect(X + 1, Y + 1, 30, 30, 7, g, used ? '#5f636a' : '#94650f', 2);
+      ctx.strokeStyle = used ? '#777' : '#c0392b'; ctx.lineWidth = 1.6; ctx.beginPath();
+      for (let k = 0; k <= 26; k += 2) { const yy = Y + 21 + Math.sin(k * 0.6 + (used ? 0 : t * 0.15)) * 1.5; if (k) ctx.lineTo(X + 3 + k, yy); else ctx.moveTo(X + 3, yy); }
+      ctx.stroke();
+      ball(X + 16, Y + 13, 8.5, used ? '#ddd' : '#cfd6ff', used ? '#9a9ea6' : '#6c7be0', used ? '#5d6168' : '#2f3a8f');
+      ball(X + 16, Y + 23, 5.5, used ? '#ddd' : '#e3e8ff', used ? '#a6aab1' : '#9aa6f0', used ? '#5d6168' : '#4a56b0');
+      if (!used) for (let k = 0; k < 3; k++) circle(X + 22 + k * 3, Y + 7 - k * 2.5 + Math.sin(t * 0.2 + k) * 0.8, 1.8, ['#f3c22f', '#e0743c', '#5aa0ff'][k]);
+    } else if (c === 'B') {
+      if (mucusStyle) { // a mucus plug
+        const g = ctx.createRadialGradient(X + 12, Y + 10, 2, X + 16, Y + 16, 22);
+        g.addColorStop(0, '#f3f5b8'); g.addColorStop(1, '#93a23a');
+        roundRect(X + 1, Y + 1, 30, 30, 10, g, '#6f7d24', 1.5);
+        for (const [dx, dy, r] of [[9, 10, 3], [20, 18, 4], [12, 23, 2]]) circle(X + dx, Y + dy, r, 'rgba(255,255,230,0.55)');
+      } else { // debris of dead cells
+        roundRect(X + 1, Y + 1, 30, 30, 5, '#9f8f78', '#6b5c48', 1.5);
+        ctx.strokeStyle = 'rgba(80,65,45,0.7)'; ctx.lineWidth = 1.5;
+        for (const [ax, ay, r, a0] of [[9, 10, 6, 0.4], [22, 12, 5, 2.1], [14, 23, 6, 3.6]]) { ctx.beginPath(); ctx.arc(X + ax, Y + ay, r, a0, a0 + 4.2); ctx.stroke(); }
+        ctx.strokeStyle = 'rgba(50,40,25,0.6)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(X + 4, Y + 17); ctx.lineTo(X + 13, Y + 15); ctx.lineTo(X + 18, Y + 21); ctx.lineTo(X + 28, Y + 19); ctx.stroke();
+      }
+    } else if (c === '~') { // thick, sticky mucus
+      const g = ctx.createLinearGradient(X, Y, X, Y + TILE);
+      g.addColorStop(0, '#eef0a0'); g.addColorStop(1, '#a8b44a');
+      ctx.fillStyle = g; ctx.fillRect(X, Y + 3, TILE, TILE - 3);
+      ctx.beginPath(); ctx.moveTo(X, Y + 4);
+      for (let k = 0; k <= TILE; k += 4) ctx.lineTo(X + k, Y + 2 + Math.sin(k * 0.4 + tx * 2 + t * 0.05) * 1.8);
+      ctx.lineTo(X + TILE, Y + 8); ctx.lineTo(X, Y + 8); ctx.closePath(); ctx.fill();
+      circle(X + 8 + (tx % 3) * 6, Y + 12 + Math.sin(t * 0.04 + tx) * 2, 2.2, 'rgba(255,255,225,0.7)');
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(X + 2, Y + 3); ctx.lineTo(X + 14, Y + 2); ctx.stroke();
+      if (!isSolid(tileAt(tx, ty + 1))) { // drips
+        const d = 4 + ((t * 0.2 + tx * 7) % 10);
+        ctx.fillStyle = '#c3cc63'; ctx.beginPath(); ctx.ellipse(X + 16, Y + TILE + d / 2, 2.5, d / 2 + 2, 0, 0, TAU); ctx.fill();
+      }
+    } else if (c === '<' || c === '>') { // airway cells with beating cilia
+      const dir = c === '>' ? 1 : -1;
+      const g = ctx.createLinearGradient(X, Y, X, Y + TILE);
+      g.addColorStop(0, '#f0b3bc'); g.addColorStop(1, '#b0606f');
+      ctx.fillStyle = g; ctx.fillRect(X, Y + 4, TILE, TILE - 4);
+      ctx.strokeStyle = 'rgba(122,52,67,0.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(X + 16, Y + 6); ctx.lineTo(X + 16, Y + TILE); ctx.stroke();
+      ctx.strokeStyle = '#fbe3e7'; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+      for (let k = 0; k < 6; k++) {
+        const bx = X + 3 + k * 5.4, a = dir * 0.5 + Math.sin(t * 0.22 - (tx * 6 + k) * 0.55 * dir) * 0.55;
+        ctx.beginPath(); ctx.moveTo(bx, Y + 5); ctx.quadraticCurveTo(bx + Math.sin(a) * 4, Y, bx + Math.sin(a) * 8, Y - 3 - Math.cos(a) * 3); ctx.stroke();
+      }
+      ctx.globalAlpha = 0.35; text(dir > 0 ? '›' : '‹', X + 16, Y + 24, { size: 14, color: '#7a3443', align: 'center', weight: '900' }); ctx.globalAlpha = 1;
+    }
+  });
 }
 
 function drawFoam(cx, cy) {
@@ -1364,7 +1671,21 @@ function drawEntities(cx, cy) {
         }
         break;
       }
-      case 'goal': { // the LC-MS/MS
+      case 'goal': { // the LC-MS/MS (or, in the CF level, a sputum sample cup)
+        const miss = missingGoals().length, nReq = L.def.goals.filter(g => g.req).length;
+        const status = () => { if (nReq) text(miss ? `${nReq - miss}/${nReq} goals` : 'ready!', x + TILE, y - TILE - 32, { size: 12, color: miss ? '#a0202f' : '#1b7f3b', align: 'center', weight: '800' }); };
+        if (L.def.goalKind === 'sputum') {
+          const X = x + 4, Y = y - TILE + 4;
+          glow(X + 28, Y + 34, 44, '#ffffff', 0.35);
+          roundRect(X, Y + 10, 56, 50, [4, 4, 12, 12], 'rgba(235,245,255,0.8)', '#8aa0b5', 2);
+          roundRect(X + 3, Y + 34, 50, 23, [0, 0, 10, 10], 'rgba(214,214,110,0.85)');
+          for (let k = 0; k < 4; k++) circle(X + 12 + k * 11, Y + 42 + (k % 2) * 6, 3, 'rgba(255,255,220,0.7)');
+          roundRect(X - 4, Y, 64, 13, 4, '#2f6fd0', '#1d4f99', 1.5);
+          ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(X + 6, Y + 14, 3, 40);
+          text('sputum sample', x + TILE, Y - 8, { size: 11, color: '#1d2733', align: 'center', weight: '800' });
+          status();
+          break;
+        }
         const X = x - 6, Y = y - TILE - 12, w = 76, h = 76;
         ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 4;
         const g = ctx.createLinearGradient(X, Y, X, Y + h);
@@ -1382,7 +1703,7 @@ function drawEntities(cx, cy) {
         circle(X + 45, Y + 54, 3.5, '#1c232c');
         circle(X + 64, Y + 68, 3, Math.floor(e.t / 30) % 2 ? '#2ee07a' : '#1b7f3b');
         text('LC-MS/MS', x + TILE, Y - 6, { size: 11, color: '#1d2733', align: 'center', weight: '800' });
-        if (L.def.need) text(`${Math.min(L.cystine, L.def.need)}/${L.def.need} S–S`, x + TILE, Y - 20, { size: 12, color: L.cystine >= L.def.need ? '#1b7f3b' : '#a0202f', align: 'center', weight: '800' });
+        status();
         break;
       }
       case 'dripper': { // pyocyanin: a blue phenazine (three fused rings) that drips
@@ -1507,10 +1828,137 @@ function drawEntities(cx, cy) {
         roundRect(X - 4, y - 4, 32, 6, 3, '#3d2a63');
         break;
       }
+      case 'peptide': { // a tryptic peptide (proteomics): a short chain ending in K or R
+        const yy = y + 16 + bob;
+        glow(x + 16, yy, 24, '#9fe7ff', 0.5);
+        for (let i = 0; i < 5; i++) ball(x + 4 + i * 6, yy + Math.sin(e.t * 0.1 + i) * 2.5, 3.6, '#ffffff', '#7fd4f0', '#2a7fa0');
+        ball(x + 31, yy + Math.sin(e.t * 0.1 + 5) * 2.5, 4.2, '#ffffff', '#5aa0ff', '#1d4f99');
+        text('K', x + 31, yy + 3.5 + Math.sin(e.t * 0.1 + 5) * 2.5, { size: 7, color: '#fff', align: 'center', weight: '900' });
+        break;
+      }
+      case 'psm': { // PSM power-up: little amphipathic helices
+        const yy = y + 16 + bob;
+        glow(x + 16, yy, 24, '#e88ad0', 0.45);
+        for (const [dx, dy, a] of [[-7, -2, -0.5], [6, -5, 0.4], [1, 6, -0.1]]) {
+          ctx.save(); ctx.translate(x + 16 + dx, yy + dy); ctx.rotate(a);
+          roundRect(-8, -3.5, 16, 7, 3.5, '#d65fb4', '#7c1f63', 1.2);
+          ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1;
+          for (let k = -6; k <= 6; k += 4) { ctx.beginPath(); ctx.moveTo(k, -3); ctx.lineTo(k + 2, 3); ctx.stroke(); }
+          ctx.restore();
+        }
+        text('PSM', x + 16, yy + 20, { size: 8, color: '#7c1f63', align: 'center', weight: '900' });
+        break;
+      }
+      case 'xan': { // staphyloxanthin: the golden carotenoid (a long conjugated chain)
+        const yy = y + 16 + bob;
+        glow(x + 16, yy, 28, '#ffd84a', 0.6);
+        ctx.strokeStyle = '#c98a00'; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.beginPath();
+        for (let i = 0; i <= 8; i++) { const px = x + 2 + i * 3.5, py = yy + (i % 2 ? -4 : 4); if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
+        ctx.stroke();
+        ball(x + 31, yy + 4, 4.5, '#fff6b0', '#f3c22f', '#b38a00');
+        for (let k = 0; k < 3; k++) { const a = e.t * 0.06 + k * TAU / 3; circle(x + 16 + Math.cos(a) * 16, yy + Math.sin(a) * 12, 1.8, '#fff3a0'); }
+        break;
+      }
+      case 'spring': { // a swollen cell: squishes when it throws you
+        const s = e.sq > 0 ? Math.sin(e.sq / 14 * Math.PI) : 0, X = x + 16, base = y + TILE;
+        const rx = 15 + s * 4, ry = 10 - s * 4;
+        ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.ellipse(X, base, 15, 3, 0, 0, TAU); ctx.fill();
+        const g = ctx.createRadialGradient(X - 5, base - ry - 4, 2, X, base - ry, rx);
+        g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, '#ffe7a8'); g.addColorStop(1, '#e0a52e');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(X, base - ry, rx, ry, 0, 0, TAU); ctx.fill();
+        ctx.strokeStyle = '#b07a10'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = 'rgba(176,122,16,0.6)'; ctx.lineWidth = 1.2;
+        for (const dx of [-6, 0, 6]) { ctx.beginPath(); ctx.moveTo(X + dx - 2, base - ry - 2); ctx.lineTo(X + dx + 2, base - ry - 2); ctx.stroke(); }
+        break;
+      }
+      case 'channel': { // a water channel opening in the floor
+        const X = x + 16, Y = y + TILE - 2;
+        glow(X, Y - 4, 26, '#6fc3ff', 0.35);
+        ctx.fillStyle = '#123247'; ctx.beginPath(); ctx.ellipse(X, Y, 14, 5, 0, 0, TAU); ctx.fill();
+        ctx.strokeStyle = '#8fd2ff'; ctx.lineWidth = 2.5; ctx.stroke();
+        for (let k = 0; k < 3; k++) { const yy = Y - ((e.t * 0.7 + k * 8) % 22); circle(X - 6 + k * 6, yy, 1.6, 'rgba(160,220,255,0.8)'); }
+        if (e.near) {
+          ctx.globalAlpha = 0.6 + 0.4 * Math.sin(e.t * 0.2);
+          text('↓', X, y - 2 + Math.sin(e.t * 0.2) * 3, { size: 16, color: '#1d6fa3', align: 'center', weight: '900' });
+          ctx.globalAlpha = 1;
+        }
+        break;
+      }
+      case 'omv': { // outer membrane vesicle: a double-membrane bubble with cargo
+        const X = x + 16, Y = y + 16;
+        ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.beginPath(); ctx.ellipse(X, (surfaceBelow(X, y + 27) || Y + 12) + 1, 9, 2.5, 0, 0, TAU); ctx.fill();
+        const g = ctx.createRadialGradient(X - 4, Y - 5, 1, X, Y, 12);
+        g.addColorStop(0, 'rgba(255,255,255,0.8)'); g.addColorStop(0.6, 'rgba(160,190,240,0.55)'); g.addColorStop(1, 'rgba(90,120,200,0.8)');
+        circle(X, Y, 12, g);
+        ctx.strokeStyle = '#4b63b5'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X, Y, 12, 0, TAU); ctx.stroke();
+        ctx.strokeStyle = 'rgba(75,99,181,0.6)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(X, Y, 9, 0, TAU); ctx.stroke();
+        for (const [dx, dy, c] of [[-3, 2, '#e0465a'], [3, -2, '#2b6fd0'], [2, 4, '#9cc21e']]) circle(X + dx, Y + dy, 2, c);
+        break;
+      }
+      case 'lasb': { // LasB elastase: a zinc protease (teal) with jaws
+        const X = e.cx, Y = e.cy, dir = e.face || 1;
+        ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.beginPath(); ctx.ellipse(X, Y + 22, 12, 3, 0, 0, TAU); ctx.fill();
+        ball(X, Y, 12, '#a8efe5', '#2f8f86', '#124a45');
+        ctx.fillStyle = '#e9f5f3';
+        const open = Math.abs(Math.sin(e.t * 0.25)) * 0.5;
+        for (const sgn of [-1, 1]) {
+          ctx.save(); ctx.translate(X + dir * 9, Y + 2); ctx.rotate(sgn * (0.35 + open) * dir);
+          ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(dir * 11, sgn * 2); ctx.lineTo(dir * 3, sgn * 5); ctx.closePath(); ctx.fill();
+          ctx.restore();
+        }
+        circle(X - dir * 2, Y + 4, 3.2, '#b9c2c9'); text('Zn', X - dir * 2, Y + 6, { size: 5, color: '#333', align: 'center', weight: '900' });
+        circle(X + dir * 3, Y - 4, 2.8, '#fff'); circle(X + dir * 4, Y - 3.5, 1.4, '#111');
+        // little wings of motion so it reads as flying
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.5;
+        for (const k of [0, 1]) { ctx.beginPath(); ctx.moveTo(X - dir * (14 + k * 5), Y - 3 + k * 6); ctx.lineTo(X - dir * (20 + k * 5), Y - 3 + k * 6); ctx.stroke(); }
+        text('LasB', X, Y - 15, { size: 8, color: '#124a45', align: 'center', weight: '900' });
+        break;
+      }
+      case 'hcn': { // a vent that puffs hydrogen cyanide
+        const X = x + 16, base = y + TILE;
+        roundRect(x + 6, base - 7, 20, 7, 3, '#6d6a7a', '#4a4756', 1.2);
+        circle(X, base - 6, 3.5, '#2b2833');
+        const ph = e.t % 260;
+        if (e.active || e.warn) {
+          const k = e.active ? Math.min(1, (ph - 170) / 20) : (ph - 140) / 30 * 0.3;
+          for (let i = 0; i < 6; i++) {
+            const a = i * 1.1 + e.t * 0.03, rr = (14 + i * 3) * k + 4;
+            const px = X + Math.sin(a) * 14 * k, py = base - 14 - i * 9 * k;
+            const g = ctx.createRadialGradient(px, py, 0, px, py, rr);
+            g.addColorStop(0, `rgba(205,195,225,${0.55 * (e.active ? 1 : 0.6)})`); g.addColorStop(1, 'rgba(205,195,225,0)');
+            circle(px, py, rr, g);
+          }
+          if (e.active) text('HCN', X, base - 40, { size: 12, color: '#4a3d6a', align: 'center', weight: '900' });
+          else text('!', X, base - 16, { size: 14, color: '#7a5db0', align: 'center', weight: '900' });
+        } else for (let k = 0; k < 2; k++) circle(X + Math.sin(e.t * 0.05 + k * 3) * 3, base - 10 - ((e.t * 0.4 + k * 10) % 18), 2, 'rgba(205,195,225,0.5)');
+        break;
+      }
+      case 'pa': case 'twitch': { // living P. aeruginosa: a rod with a flagellum (pa) or pili (twitch)
+        const swim = e.type === 'pa';
+        const X = swim ? e.cx : e.x + 16, Y = swim ? e.cy : e.y + 24;
+        const ang = swim ? e.ang : (e.dir > 0 ? 0 : Math.PI);
+        ctx.save(); ctx.translate(X, Y); ctx.rotate(ang);
+        if (swim) {
+          ctx.strokeStyle = 'rgba(70,110,50,0.8)'; ctx.lineWidth = 1.6; ctx.beginPath();
+          for (let k = 0; k <= 16; k++) { const px = -14 - k * 1.3, py = Math.sin(k * 0.8 - e.t * 0.4) * 3; if (k) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = 'rgba(70,110,50,0.7)'; ctx.lineWidth = 1;
+          const ext = e.t % 50 < 16 ? 4 : 9;
+          for (const dy of [-3, 0, 3]) { ctx.beginPath(); ctx.moveTo(14, dy); ctx.lineTo(14 + ext, dy * 1.6); ctx.stroke(); }
+        }
+        const g = ctx.createLinearGradient(0, -7, 0, 7);
+        g.addColorStop(0, '#b8e6a2'); g.addColorStop(0.5, '#5fae4f'); g.addColorStop(1, '#2f6b28');
+        roundRect(-14, -7, 28, 14, 7, g, '#24521f', 1.5);
+        ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.beginPath(); ctx.ellipse(-3, -3.5, 7, 1.6, 0, 0, TAU); ctx.fill();
+        circle(7, -1, 2.6, '#fff'); circle(8, -1, 1.3, '#111');
+        ctx.restore();
+        break;
+      }
       case 'shuttle': { // moving bridge: a chain of protein beads that runs while its signal is ON
         const on = !e.ch || L.chan[e.ch];
         ctx.save(); ctx.setLineDash([4, 8]); ctx.strokeStyle = on ? 'rgba(58,163,154,0.45)' : 'rgba(80,90,95,0.3)'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(e.x0 + 4, e.y0 + 6); ctx.lineTo(e.x1 + e.len * TILE - 4, e.y1 + 6); ctx.stroke(); ctx.restore();
+        ctx.beginPath(); ctx.moveTo(e.x0 + e.len * 16, e.y0 + 6); ctx.lineTo(e.x1 + e.len * 16, e.y1 + 6); ctx.stroke(); ctx.restore();
         const X0 = e.px, X1 = e.px + e.len * TILE;
         if (on) glow((X0 + X1) / 2, e.py + 6, 50, '#4cc3b6', 0.25);
         roundRect(X0 + 1, e.py + 1, X1 - X0 - 2, 11, 5, on ? 'rgba(29,111,104,0.85)' : 'rgba(80,90,95,0.85)');
@@ -1525,6 +1973,10 @@ function drawEntities(cx, cy) {
     roundRect(b.x + 1, b.y + 1, 30, 30, 7, b.docked ? 'rgba(205,245,215,0.95)' : 'rgba(238,228,252,0.95)', b.docked ? '#2e9b52' : '#7a4fc9', 2);
     drawAipIcon(b.x + 15, b.y + 13, 0.95);
     text('AIP', b.x + 16, b.y + 29, { size: 7, color: b.docked ? '#1e6b38' : '#5b2a8a', align: 'center', weight: '900' });
+  }
+  for (const s of L.shots) { // PSM shots: small pink helices with a trail
+    for (let k = 1; k <= 3; k++) circle(s.x - s.vx * k * 0.8, s.y - s.vy * k * 0.8, 4 - k, `rgba(232,138,208,${0.5 - k * 0.12})`);
+    ball(s.x, s.y, 5, '#ffe0f4', '#e05fb8', '#8a1f6a');
   }
   for (const b of L.movers) { // air bubbles
     const s = Math.min(1, b.t / 12), r = b.r * s, X = b.x + Math.sin(b.t * 0.06) * 2, Y = b.y;
@@ -1567,6 +2019,10 @@ function drawPlayer() {
     ctx.strokeStyle = 'rgba(230,180,40,0.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 26, 0, TAU); ctx.stroke();
     ctx.restore();
   }
+  if (P.gold > 0) {   // staphyloxanthin glow
+    glow(cx, cy, 34, '#ffd84a', 0.55 + 0.15 * Math.sin(L.time * 0.2));
+    for (let k = 0; k < 4; k++) { const a = L.time * 0.08 + k * TAU / 4; circle(cx + Math.cos(a) * 22, cy + Math.sin(a) * 22, 2, '#fff3a0'); }
+  }
   drawCoccus(cx, cy, 14, S.colour, { face: P.face, slow: P.slow > 0, squash: P.squash, roll: P.roll, blink: L.time % 240 < 8 });
   if (P.shield > 0) {
     circle(cx, cy, 22, 'rgba(90,160,255,0.16)');
@@ -1593,7 +2049,8 @@ function drawHUD() {
   }
   text('replicates', 240, 33, { size: 12, color: dim });
   drawCystineIcon(330, 28, 0.62);
-  text(`${L.cystine}${L.def.need ? '/' + L.def.need : ''}`, 348, 34, { size: 15, color: L.def.need && L.cystine >= L.def.need ? '#8be28f' : W, weight: '800' });
+  const cg = L.def.goals.find(g => g.id === 'cys');
+  text(`${L.cystine}${cg ? '/' + cg.n : ''}`, 348, 34, { size: 15, color: cg && L.cystine >= cg.n ? '#8be28f' : W, weight: '800' });
   drawIronIcon(406, 28, 0.75);
   for (let i = 0; i < 3; i++) circle(424 + i * 12, 28, 4, i < L.ironBank ? '#e0743c' : 'rgba(255,255,255,0.22)');
   text(`score ${G.score + L.points}`, 476, 34, { size: 15, color: W, weight: '700' });
@@ -1608,6 +2065,8 @@ function drawHUD() {
   if (P.shield > 0) chip('AhpC', '#3a7bd5');
   if (P.magnet > 0) chip(`TcyA ${Math.ceil(P.magnet / 60)}`, '#b38600');
   if (P.slow > 0) chip('HQNO', '#4f7f2a');
+  if (P.ammo > 0) chip(`PSM ${P.ammo}`, '#b0408f');
+  if (P.gold > 0) chip(`xanthin ${Math.ceil(P.gold / 60)}`, '#c99512');
   if (L.def.timeLimit) {
     // Game seconds left, scaled so the whole limit shows as 15 pulse minutes.
     const left = Math.max(0, L.def.timeLimit - L.time / 60) * PULSE_S / L.def.timeLimit;
@@ -1630,7 +2089,7 @@ function drawHUD() {
   }
 }
 
-function panel({ title, sub = '', lines = [], footer = '', accent = '#2b5d8a', bodyY = 196 }) {
+function panel({ title, sub = '', lines = [], footer = '', accent = '#2b5d8a', bodyY = 196, lineH = 28 }) {
   ctx.fillStyle = 'rgba(8,20,28,0.62)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 30; ctx.shadowOffsetY = 8;
   roundRect(130, 60, 700, 420, 18, '#fbf8f1');
@@ -1641,7 +2100,7 @@ function panel({ title, sub = '', lines = [], footer = '', accent = '#2b5d8a', b
   ctx.globalAlpha = 1;
   text(title, VIEW_W / 2, 108, { size: 32, color: '#fff', align: 'center', weight: '800' });
   if (sub) text(sub, VIEW_W / 2, 136, { size: 16, color: 'rgba(255,255,255,0.88)', align: 'center' });
-  lines.forEach((ln, i) => text(ln, VIEW_W / 2, bodyY + i * 28, { size: 17, color: '#2b2b2b', align: 'center', weight: '500' }));
+  lines.forEach((ln, i) => text(ln, VIEW_W / 2, bodyY + i * lineH, { size: lineH < 28 ? 16 : 17, color: /^[•★]/.test(ln) ? '#1d3f5e' : '#2b2b2b', align: 'center', weight: /^[•★]/.test(ln) ? '700' : '500' }));
   if (footer) {
     ctx.globalAlpha = 0.55 + 0.45 * Math.sin(performance.now() / 260);
     text(footer, VIEW_W / 2, 455, { size: 16, color: accent, align: 'center', weight: '700' });
@@ -1649,10 +2108,22 @@ function panel({ title, sub = '', lines = [], footer = '', accent = '#2b5d8a', b
   }
 }
 
-function drawStars(stars, y) {
-  const labels = ['sample measured', 'all 3 replicates', '≥ 80 % cystine'];
+// The level's goal checklist, bottom-left. Required goals first, ★ = bonus goal.
+function drawGoalList() {
+  const gs = L.def.goals.map(g => ({ g, s: goalStatus(g) }));
+  ctx.font = `700 12px ${FONT}`;
+  const w = Math.max(...gs.map(({ g, s }) => ctx.measureText(`☐ ${s.text}${g.req ? '' : '  ★'}`).width)) + 22;
+  const h = gs.length * 17 + 10, y0 = VIEW_H - h - 10;
+  roundRect(10, y0, w, h, 10, 'rgba(14,26,36,0.5)');
+  gs.forEach(({ g, s }, i) => text(`${s.done ? '☑' : '☐'} ${s.text}${g.req ? '' : '  ★'}`, 20, y0 + 19 + i * 17, { size: 12, color: s.done ? '#9be89f' : '#f4f1ea', weight: '700' }));
+}
+function goalLines(def) {
+  return def.goals.map(g => `${g.req ? '•' : '★'} ${g.label}${g.req ? '' : ' (bonus star)'}`);
+}
+
+function drawStars(stars, labels, y) {
   stars.forEach((on, i) => {
-    const x = VIEW_W / 2 + (i - 1) * 150;
+    const x = VIEW_W / 2 + (i - (stars.length - 1) / 2) * 160;
     if (on) glow(x, y, 34, '#f3c22f', 0.35);
     star(x, y, 22, on);
     text(labels[i], x, y + 42, { size: 13, color: on ? '#5a4500' : '#9a9384', align: 'center', weight: '700' });
@@ -1677,7 +2148,10 @@ function drawPauseMenu() {
 }
 
 function strainCards() {
-  return ['anc', 'stk', 'stp'].map((key, i) => ({ key, x: 90 + i * 270, y: 236, w: 240, h: 196 }));
+  return ['anc', 'stk', 'stp'].map((key, i) => ({ key, x: 90 + i * 270, y: 212, w: 240, h: 170 }));
+}
+function levelChips() {
+  return LEVELS.map((d, i) => ({ i, x: 180 + i * 190, y: 396, w: 180, h: 36 }));
 }
 
 // Title background: drifting grape-like clusters of cocci.
@@ -1712,8 +2186,8 @@ function drawTitle() {
   drawCoccus(VIEW_W / 2 - 200, 70 + Math.sin(t * 3) * 6, 16, '#0072B2', { face: 1 });
   drawCoccus(VIEW_W / 2 + 200, 70 + Math.sin(t * 3 + 1.5) * 6, 16, '#009E73', { face: -1 });
   text('A Staphylococcus aureus platformer from the Bio253 proteomics course', VIEW_W / 2, 132, { size: 18, color: '#3d3d3d', align: 'center' });
-  text('TSB → SNpulse → SN.  Collect cystine, keep your 3 replicates, reach the LC-MS/MS.', VIEW_W / 2, 176, { size: 16, color: '#2b2b2b', align: 'center', weight: '500' });
-  text('Choose your strain (1 / 2 / 3, ← →, or click):', VIEW_W / 2, 214, { size: 16, color: '#2b2b2b', align: 'center' });
+  text('TSB → SNpulse → SN, plus a bonus CF airway. Solve, collect, keep your replicates.', VIEW_W / 2, 168, { size: 16, color: '#2b2b2b', align: 'center', weight: '500' });
+  text('Choose your strain (1 / 2 / 3, ← →, or click a card to start):', VIEW_W / 2, 200, { size: 16, color: '#2b2b2b', align: 'center' });
   for (const c of strainCards()) {
     const S = STRAINS[c.key], sel = G.strain === c.key, lift = sel ? -6 : 0;
     ctx.save();
@@ -1726,11 +2200,18 @@ function drawTitle() {
     text(S.title, c.x + 72, c.y + 62 + lift, { size: 13, color: '#555' });
     S.lines.forEach((ln, i) => text(ln, c.x + 16, c.y + 104 + lift + i * 22, { size: 13, color: '#2b2b2b', weight: '500' }));
   }
+  // level picker: the game starts at the chosen level
+  text('Level (↑ ↓):', 170, 419, { size: 14, color: '#2b2b2b', align: 'right', weight: '700' });
+  for (const c of levelChips()) {
+    const d = LEVELS[c.i], sel = G.startLevel === c.i;
+    roundRect(c.x, c.y, c.w, c.h, 18, sel ? d.theme.accent : 'rgba(255,255,255,0.6)', sel ? null : 'rgba(0,0,0,0.15)', 1.5);
+    text(c.i < 3 ? `${c.i + 1}. ${d.name}` : `★ ${d.name} (bonus)`, c.x + c.w / 2, c.y + 24, { size: 14, color: sel ? '#fff' : '#2b2b2b', align: 'center', weight: '800' });
+  }
   ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 4);
-  text(`Press Enter / Space to start${G.best ? '   ·   best score ' + G.best : ''}`, VIEW_W / 2, 476, { size: 17, color: '#10202b', align: 'center', weight: '800' });
+  text(`Press Enter / Space to start${G.best ? '   ·   best score ' + G.best : ''}`, VIEW_W / 2, 466, { size: 17, color: '#10202b', align: 'center', weight: '800' });
   ctx.globalAlpha = 1;
-  text(`M sound ${AUDIO.sfxOn ? 'on' : 'off'} · N music ${AUDIO.musicOn ? 'on' : 'off'} · P pause menu`, VIEW_W / 2, 500, { size: 13, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '600' });
-  text('PASN = cell-free spent medium of P. aeruginosa PAO1 (no living Pseudomonas).', VIEW_W / 2, 524, { size: 13, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '500' });
+  text(`M sound ${AUDIO.sfxOn ? 'on' : 'off'} · N music ${AUDIO.musicOn ? 'on' : 'off'} · P pause menu`, VIEW_W / 2, 494, { size: 13, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '600' });
+  text('PASN = cell-free spent medium of P. aeruginosa PAO1 (no living Pseudomonas).', VIEW_W / 2, 520, { size: 13, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '500' });
 }
 
 function drawVignette() { ctx.drawImage(VIGNETTE, 0, 0); }
@@ -1744,6 +2225,7 @@ function drawWorld() {
   drawBackground(th, cx, cy);
   ctx.drawImage(L.art.tiles, cx, cy, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
   ctx.translate(-cx, -cy);
+  drawSpecialTiles(cx, cy);
   drawFoam(cx, cy);
   drawLysis(cx, cy);
   drawSigns(cx, cy);
@@ -1755,6 +2237,7 @@ function drawWorld() {
   drawDarkness(cx, cy);
   drawVignette();
   drawSignText(cx, cy);
+  drawGoalList();
   drawHUD();
 }
 
@@ -1765,7 +2248,7 @@ function draw() {
   const S = STRAINS[G.strain];
   switch (G.state) {
     case 'intro':
-      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat(['', `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent });
+      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), ['', `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
       break;
     case 'paused':
       drawPauseMenu();
@@ -1773,8 +2256,8 @@ function draw() {
     case 'levelDone': {
       const r = G.results[G.levelIdx];
       const stats = `S–S ${r.cystine}/${r.totalCys} · Fe ${r.iron} · replicates ${r.reps}/3 · ${r.secs.toFixed(0)} s   →   +${r.total} points`;
-      panel({ title: `${L.def.name}: sample measured!`, sub: stats, lines: LEVEL_FACTS[G.levelIdx], footer: 'Press Enter to continue', accent: '#1b7f3b', bodyY: 316 });
-      drawStars(r.stars, 206);
+      panel({ title: `${L.def.name}: sample ${L.def.goalKind === 'sputum' ? 'delivered' : 'measured'}!`, sub: stats, lines: LEVEL_FACTS[G.levelIdx], footer: 'Press Enter to continue', accent: '#1b7f3b', bodyY: 316 });
+      drawStars(r.stars, r.starLabels, 206);
       break;
     }
     case 'gameOver':
@@ -1790,7 +2273,7 @@ function draw() {
     case 'win':
       panel({
         title: 'All samples measured!', sub: `Strain ${S.label} · total score ${G.score}${G.newBest ? '  (new best!)' : ''}`,
-        lines: G.results.map(r => `${r.name}: ${r.total} points  ${'★'.repeat(r.stars.filter(Boolean).length)}${'☆'.repeat(3 - r.stars.filter(Boolean).length)}  (S–S ${r.cystine}/${r.totalCys}, ${r.reps}/3 replicates)`).concat([''], strainFact(G.strain)),
+        lines: G.results.filter(Boolean).map(r => `${r.name}: ${r.total} points  ${'★'.repeat(r.stars.filter(Boolean).length)}${'☆'.repeat(r.stars.length - r.stars.filter(Boolean).length)}  (peptides ${r.peptides}/${r.totalPep}, ${r.reps}/3 replicates)`).concat([''], strainFact(G.strain)),
         footer: 'Press Enter to play another strain', accent: '#7a5a00',
       });
       break;
