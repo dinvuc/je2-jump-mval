@@ -20,19 +20,26 @@ You are a golden *S. aureus* JE2 cell. Pick one of the three course strains:
 Then play the three media of the experiment as levels, plus a bonus level:
 
 1. **TSB** (60 × 46 tiles): control medium, tutorial. A room with a ribosome
-   block and a tunnel under the floor, a strand tower, a middle ledge with the
-   quorum-sensing gate, and the MS on top. No PASN, so no PASN hazards.
+   block and a short tunnel (a shortcut), a strand tower, a middle ledge with
+   the quorum-sensing gate, and the MS on top. No PASN, so no PASN hazards.
 2. **SNpulse** (48 × 72): grown in TSB, then 15 min PASN. A climb against the
-   pulse clock: OMVs, HCN vents, LasB, a phospho-switch lift, a bubble ride and
-   lysed strands up to the MS at the top.
+   pulse clock: an OMV room, a ledge of HCN vents and superoxide rockets, a
+   strand shaft with LasB, a phospho-switch lift, a bubble ride, and lysed
+   strands to the MS at the top. One secret tunnel.
 3. **SN** (70 × 64): ~15 h in 70 % TSB + 30 % PASN. Down from a high start
-   through a thick biofilm with a tunnel inside, a pit over rhamnolipid foam,
-   and a quorum-sensing gate in front of the MS. A cave and a second tunnel
-   hide peptides.
+   onto a thick biofilm (over the top, or through its tunnel), into a pit over
+   rhamnolipid foam, and along the floor to the gate in front of the MS.
 4. **CF airway** (36 × 96, bonus): a cystic fibrosis airway. Floors alternate
-   left and right; you climb through sticky mucus, past beating cilia and mucus
-   plugs, and neutralise living *P. aeruginosa* on the way to a sputum sample.
+   left and right; you climb through sticky mucus, past beating cilia, mucus
+   plugs and superoxide, while the patient coughs now and then (the screen
+   shakes, air pushes you, and more *P. aeruginosa* appear). At the top waits
+   the boss, a **mucoid *P. aeruginosa* colony** in an alginate shell: it
+   spits pyocyanin, releases cells and slams the floor; shoot it, or jump on
+   it while its shell is open. Then reach the sputum sample.
    **This level is a game setting, not part of the course experiment.**
+
+Each level has at most one tunnel, with labelled channels ("tunnel",
+"back up", "secret"), and glowing arrows show the way at every turn.
 
 Each level has a goal checklist (bottom-left on screen). Required goals must be
 done before the MS (or the sputum sample) takes your sample; bonus goals give
@@ -41,9 +48,9 @@ stars:
 | level | required | bonus stars |
 |---|---|---|
 | TSB | open the quorum-sensing gate | all 3 hidden peptides · keep 3/3 replicates |
-| SNpulse | reach the MS before the pulse ends | all 3 hidden peptides · neutralise 4 *P. aeruginosa* products |
+| SNpulse | reach the MS before the pulse ends | all 3 hidden peptides · neutralise 5 *P. aeruginosa* products |
 | SN | collect 6 cystine · open the gate | all 3 hidden peptides · keep 3/3 replicates |
-| CF airway | neutralise 6 *P. aeruginosa* cells | all 3 hidden peptides · keep 3/3 replicates |
+| CF airway | clear the mucoid colony · neutralise 6 *P. aeruginosa* cells | all 3 hidden peptides · keep 3/3 replicates |
 
 PASN is the cell-free, sterile-filtered spent medium of *P. aeruginosa* PAO1.
 It contains secreted molecules only. In the three PASN/TSB levels no living
@@ -54,7 +61,7 @@ appear only in the separate CF bonus level.
 
 | thing | meaning |
 |---|---|
-| 3 sample tubes (lives) | your 3 replicates. Lose them all and the game says "n = 0: no statistics possible" |
+| 3 culture flasks (lives) | your 3 replicates. A lost one is empty and flashes red. Lose them all and the game says "n = 0: no statistics possible" |
 | S–S (L-cystine) | collectible. TcyABC is the cystine transporter (TcyA = `B7H15_13375`) |
 | Fe | iron. Every 3 Fe restore a replicate |
 | tryptic peptide (chain ending in K) | hidden collectible, 3 per level. In proteomics, trypsin cuts proteins after K/R and the MS identifies the peptides |
@@ -64,6 +71,7 @@ appear only in the separate CF bonus level.
 | AhpC power-up | shield against one ROS hit (AhpC = `B7H15_02095`, alkyl hydroperoxide reductase) |
 | TcyA power-up | pulls cystine towards you |
 | blue drops from a phenazine | pyocyanin, which makes ROS and costs a replicate |
+| blue launcher + flying red O₂ | pyocyanin redox launcher firing superoxide radicals (O₂•⁻, a ROS) in straight lines. Jump over, stomp or shoot them; AhpC and staphyloxanthin protect you |
 | green cloud | HQNO, which inhibits respiration and makes you slow |
 | HCN vent | puffs hydrogen cyanide now and then; the cloud costs a replicate |
 | LasA (walks) / LasB (flies) | *P. aeruginosa* proteases. LasA charges when it sees you. Jump on them or shoot them |
@@ -71,6 +79,8 @@ appear only in the separate CF bonus level.
 | glowing yellow-green claw | siderophore (e.g. pyoverdine). It steals iron; PSMs stop it |
 | pink foam | rhamnolipids, *P. aeruginosa* biosurfactants. Costs a replicate |
 | green rods (CF level only) | living *P. aeruginosa*: swimming (flagellum) and twitching (pili) cells |
+| green gel blob with eyes (CF boss) | a mucoid *P. aeruginosa* colony wrapped in alginate |
+| "COUGH!" (CF level) | every 24–46 s, with a warning: the screen shakes, air pushes you up, and up to 3 more *P. aeruginosa* appear |
 | yellow-green goo (CF) | thick mucus: slow and lower jumps |
 | pink floor with hairs (CF) | cilia that push you along |
 | debris / mucus plug blocks | shoot them, or bump them from below |
@@ -80,7 +90,8 @@ appear only in the separate CF bonus level.
 | water channel (blue opening) | stand on it and press `↓`: you come out at the other end |
 | AIP block, AgrC notch, AgrB | quorum-sensing puzzle: push the AIP into AgrC to open the purple gate. Touch AgrB for a fresh AIP |
 | phospho-switch + bead bridge / lift | touch the switch (a phosphate is added, ON) and the bridge or lift runs for 10 s, then a phosphatase switches it OFF |
-| cryo-vial | glycerol stock = checkpoint. You restart from the last one you touched |
+| cryo-vial | glycerol stock = checkpoint. You restart from the last one you touched. The HUD counts the stocks you have saved in the level |
+| glowing arrows | the way to go |
 | bubble with "i" | info vesicle: walk close to read it |
 | ground of packed cocci, strands, tunnels | decoration (biofilm look). Strands can be jumped through from below |
 
@@ -120,7 +131,9 @@ music falls under the same MIT license as the code.
   from step 03.
 - **Not from the course:** the CF bonus level. Our experiment used PASN in
   vitro, not CF samples. Its fact card is general background (see sources).
-- **Game metaphors, not biological claims:** "double jump = kinase boost", the
+- **Game metaphors, not biological claims:** the boss (a mucoid colony that
+  walks, spits and slams), coughs that "add" bacteria, superoxide fired like
+  rockets, "double jump = kinase boost", the
   slow recharge for `stp`, "3 Fe = one replicate", the AhpC shield, the TcyA
   magnet, HQNO slowing you down, LasA/LasB/OMVs/HCN/rhamnolipids as hazards,
   "lysed cells" that collapse, ribosome blocks, shooting PSMs (in reality
@@ -152,7 +165,9 @@ music falls under the same MIT license as the code.
   AgrC); phenol-soluble modulins; staphyloxanthin as the golden, antioxidant
   carotenoid of *S. aureus*; cystic fibrosis (CFTR, thick mucus, impaired
   mucociliary clearance, *S. aureus* common in children and *P. aeruginosa*
-  more common with age); trypsin cutting after K/R in bottom-up proteomics.
+  more common with age; mucoid, alginate-producing *P. aeruginosa* in chronic
+  CF infection); pyocyanin redox cycling producing superoxide and hydrogen
+  peroxide; trypsin cutting after K/R in bottom-up proteomics.
 
 ## Files
 
@@ -185,7 +200,9 @@ foam(L, 8, 9, 29);                   // rhamnolipid foam on the floor
 sign(L, 13, 29, 'Some text');        // info vesicle
 vent(L, 5, 29, 10);                  // air bubbles that rise 10 rows
 spring(L, 25, 29);                   // swollen cell
-channel(L, 3, 29, 1); channel(L, 4, 34, 1);   // two ends of water channel 1
+channel(L, 3, 29, 1, 'tunnel'); channel(L, 4, 34, 1, 'back up');   // two labelled ends of channel 1
+rosgun(L, 40, 29);                   // pyocyanin launcher firing superoxide
+arrow(L, 30, 29, 'up');              // a glowing arrow: this way
 agrb(L, 24, 29);                     // AgrB; its AIP block appears at column 25
 agrc(L, 30, 30, 'a');                // AgrC notch in the floor, signal 'a'
 gate(L, 36, 25, 5, 'a');             // gate rows 25-29, opens on signal 'a'

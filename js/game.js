@@ -20,7 +20,7 @@ const SPRING_V = -15.5;                     // swollen-cell bounce (~6 rows)
 const MAX_AMMO = 20;                        // PSM shots you can carry
 const SOLID = new Set(['#', '~', '<', '>', 'B', 'R', 'U']);   // biofilm, mucus, cilia, debris, ribosome (U = used)
 const isSolid = c => SOLID.has(c);
-const ENEMIES = new Set(['lasa', 'omv', 'lasb', 'pa', 'twitch', 'sidero']);
+const ENEMIES = new Set(['lasa', 'omv', 'lasb', 'pa', 'twitch', 'sidero', 'rosb']);
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -113,6 +113,12 @@ const AUDIO = (() => {
     ribo: () => arp([392, 523, 784], 0.05, 'square', 0.04, 0.1),
     breakb: () => { hiss(0.15, 0.08, ac.currentTime, 800, sfxBus); fx(140, 60, 0.12, 'square', 0.04); },
     peptide: () => arp([659, 880, 1175, 1568], 0.06, 'sine', 0.06, 0.18),
+    cough: () => {
+      for (const d of [0, 0.28]) { hiss(0.32, 0.22, ac.currentTime + d, 120, sfxBus); fx(140, 70, 0.25, 'sawtooth', 0.05, d); }
+    },
+    warn: () => arp([880, 660, 880], 0.12, 'square', 0.03, 0.08),
+    bossHit: () => { fx(300, 90, 0.18, 'square', 0.06); hiss(0.08, 0.06, ac.currentTime, 2000, sfxBus); },
+    bossDie: () => { arp([523, 392, 330, 262, 196, 131], 0.08, 'sawtooth', 0.05, 0.2); hiss(0.8, 0.12, ac.currentTime, 300, sfxBus); },
   };
 
   // -- the soundtrack: 8 bars (128 sixteenth steps), chords C Am F G | C Am F G --
@@ -135,6 +141,8 @@ const AUDIO = (() => {
     TSB: { bpm: 116, tr: 0, minor: false, lead: 'square', drums: 1 },
     SNpulse: { bpm: 138, tr: 2, minor: false, lead: 'square', drums: 2 },
     SN: { bpm: 100, tr: -3, minor: true, lead: 'triangle', drums: 1 },
+    'CF airway': { bpm: 108, tr: -5, minor: true, lead: 'triangle', drums: 1 },
+    boss: { bpm: 152, tr: -2, minor: true, lead: 'square', drums: 2 },
   };
   let song = null, step = 0, nextT = 0;
   const pitch = n => {
@@ -243,7 +251,7 @@ let P = null;  // the player
 
 function setState(s) {
   G.state = s; clearPressed();
-  AUDIO.music(s === 'title' ? 'title' : L ? L.def.name : 'title');
+  AUDIO.music(s === 'title' ? 'title' : !L ? 'title' : L.bossActive && !L.bossDown ? 'boss' : L.def.name);
   AUDIO.duck(s === 'paused');
 }
 
@@ -262,11 +270,14 @@ function loadLevel(i) {
     ents: b.ents.map(e => ({ ...e, x: e.tx * TILE, y: e.ty * TILE, alive: true, t: 0 })),
     time: 0, cam: 0, camY: 0, cystine: 0, ironBank: 0, ironTotal: 0, points: 0, goalMsgT: 0,
     fx: [], pops: [], movers: [], blocks: [], shots: [], lysis: new Map(), chan: {}, solids: [], plats: [],
-    combo: 0, comboT: 0, kills: 0, peptides: 0, gateOpened: false,
+    combo: 0, comboT: 0, kills: 0, peptides: 0, gateOpened: false, spawnQ: [],
+    bossActive: false, bossDown: false,
+    coughNext: 60 * (14 + Math.random() * 10), coughing: 0, coughWarn: 0, coughFlash: 0,
     art: buildLevelArt(b, def.theme, i),
   };
   L.totalCys = L.ents.filter(e => e.type === 'cystine').length;
   L.totalPep = L.ents.filter(e => e.type === 'peptide').length;
+  L.totalStocks = L.ents.filter(e => e.type === 'check').length; L.stocks = 0;
   for (const e of L.ents) initEntity(e);
   for (const e of L.ents) if (e.ch && (e.type === 'gate' || e.type === 'shuttle')) {
     const src = L.ents.find(o => (o.type === 'agrc' || o.type === 'phos') && o.ch === e.ch);
@@ -300,11 +311,20 @@ function initEntity(e) {
     case 'agrb': e.cool = 0; e.block = { x: e.x + TILE, y: e.y, w: TILE, h: TILE, vy: 0, home: e, docked: false, block: true }; L.blocks.push(e.block); break;
     case 'agrc': e.on = false; break;
     case 'phos': e.timer = 0; break;
-    case 'omv': e.vx = 1.2; e.vy = 0; break;
+    case 'omv': e.vx = 1.5; e.vy = 0; break;
     case 'lasb': case 'pa': e.hx = e.x + 16; e.hy = e.y + 16; e.cx = e.hx; e.cy = e.hy; e.ang = 0; break;
     case 'twitch': e.dir = -1; break;
     case 'channel': case 'spring': e.cool = 0; e.sq = 0; break;
+    case 'rosgun': e.cool = 60 + (e.tx * 37) % 120; break;
+    case 'boss': Object.assign(e, { bx: e.x + 16, by: (e.ty + 1) * TILE, hp: 20, maxHp: 20, state: 'idle', timer: 0, dir: 1, open: 0, vy: 0, jy: 0, hitT: 0, cycle: 0 }); break;
   }
+}
+// New enemies appear at the end of the entity update (coughs, the boss, launchers).
+function spawnEnemy(type, x, y, extra = {}) {
+  const e = { type, tx: Math.floor(x / TILE), ty: Math.floor(y / TILE), x: x - 16, y: y - 16, alive: true, t: 0, ...extra };
+  initEntity(e);
+  L.spawnQ.push(e);
+  return e;
 }
 
 function toast(text, frames = 200) { G.toast = text; G.toastT = frames; }
@@ -464,6 +484,10 @@ function updateShots() {
       s.y = by * TILE - 5; s.vy = -4.6;
       if (++s.bounces > 3) s.life = 0;
     }
+    if (s.life > 0 && L.bossActive) for (const e of L.ents) {   // PSMs hurt the boss too
+      if (e.type !== 'boss' || !e.alive || e.state === 'dead') continue;
+      if (overlap({ x: s.x - 4, y: s.y - 4, w: 8, h: 8 }, bossBox(e))) { damageBoss(e, e.open > 0.6 ? 2 : 1); s.life = 0; }
+    }
     if (s.life > 0) for (const e of L.ents) {
       if (!e.alive || !ENEMIES.has(e.type)) continue;
       const b = enemyBox(e);
@@ -481,22 +505,127 @@ function enemyBox(e) {
     case 'omv': return { x: e.x + 5, y: e.y + 5, w: 22, h: 22 };
     case 'twitch': return { x: e.x + 2, y: e.y + 17, w: 28, h: 15 };
     case 'sidero': return { x: e.cx - 12, y: e.cy - 12, w: 24, h: 24 };
+    case 'rosb': return { x: e.x + 2, y: e.y + 9, w: 28, h: 14 };
     default: return { x: e.cx - 13, y: e.cy - 9, w: 26, h: 18 };   // lasb, pa
   }
 }
-const ENEMY_COL = { lasa: '#b8404c', omv: '#8fb6e8', lasb: '#2f8f86', pa: '#5fae4f', twitch: '#5fae4f', sidero: '#c8e85a' };
+const ENEMY_COL = { lasa: '#b8404c', omv: '#8fb6e8', lasb: '#2f8f86', pa: '#5fae4f', twitch: '#5fae4f', sidero: '#c8e85a', rosb: '#ff7a3c' };
 function killEnemy(e) {
   const b = enemyBox(e);
-  e.alive = false; L.kills++;
+  e.alive = false;
+  if (e.type !== 'rosb') L.kills++;   // a radical is not a P. aeruginosa product or cell
+  else once('rosstomp', 'Superoxide neutralised. Antioxidant enzymes do this inside real cells.');
   gain(200, b.x + b.w / 2, b.y, '#ff8a96');
   burst(b.x + b.w / 2, b.y + b.h / 2, ENEMY_COL[e.type] || '#b8404c', 16, 3.2);
   G.shake = Math.max(G.shake, 5); AUDIO.play('stomp');
 }
-function enemyContact(e, msg) {
+function enemyContact(e, msg, kind = 'enemy') {
   const b = enemyBox(e);
   if (!overlap(P, b)) return;
   if (P.vy > 0 && P.y + P.h - P.vy <= b.y + 8) { killEnemy(e); P.vy = JUMP_V * 0.7; P.sprung = false; }
-  else hurt('enemy', msg);
+  else hurt(kind, msg);
+}
+
+// ---- the boss: a mucoid P. aeruginosa colony wrapped in alginate (CF level) ----------
+function bossBox(e) { return { x: e.bx - 46, y: e.by + e.jy - 70, w: 92, h: 70 }; }
+function damageBoss(e, n) {
+  if (e.hitT > 0 || e.state === 'dead') return;
+  e.hp -= n; e.hitT = 18;
+  G.shake = Math.max(G.shake, 6);
+  burst(e.bx, e.by - 40, '#9be07a', 14, 3);
+  AUDIO.play('bossHit');
+  if (e.hp <= 0) {
+    e.state = 'dead'; e.timer = 0; L.bossDown = true; L.kills++; L.points += 3000;
+    burst(e.bx, e.by - 40, '#c9f0a0', 40, 5); burst(e.bx, e.by - 40, '#5fae4f', 30, 4);
+    G.shake = 16; AUDIO.play('bossDie'); AUDIO.music(L.def.name);
+    toast('You cleared the mucoid P. aeruginosa colony! Now reach the sputum sample.', 260);
+  }
+}
+function bossGlob(e, vx, vy) { spawnEnemy('glob', e.bx, e.by + e.jy - 50, { vx, vy }); }
+function updateBoss(e, pcx) {
+  if (e.hitT > 0) e.hitT--;
+  if (e.state === 'dead') { if (++e.timer > 90) e.alive = false; return; }
+  if (!L.bossActive) {
+    if (P.y + P.h <= e.by + 2 && P.y + P.h > e.by - 12 * TILE) {
+      L.bossActive = true; e.state = 'walk'; e.timer = 0;
+      AUDIO.music('boss');
+      toast('A mucoid P. aeruginosa colony, wrapped in alginate! Shoot it, or jump on it while its shell is open.', 280);
+    }
+    return;
+  }
+  e.timer++;
+  const angry = e.hp <= e.maxHp / 2, lo = 2 * TILE + 46, hi = (L.cols - 2) * TILE - 46;
+  switch (e.state) {
+    case 'walk':
+      e.dir = Math.sign(pcx - e.bx) || e.dir;
+      e.bx = clamp(e.bx + e.dir * (angry ? 1.5 : 1.0), lo, hi);
+      if (e.timer > (angry ? 130 : 170)) { e.state = e.cycle++ % 2 ? 'spawn' : 'spit'; e.timer = 0; }
+      break;
+    case 'spit': // pyocyanin globs in arcs
+      if (e.timer % 15 === 0 && e.timer <= 45) bossGlob(e, clamp((pcx - e.bx) / 45, -5, 5) + (Math.random() - 0.5) * 1.5, -7 - Math.random() * 2);
+      if (e.timer > 60) { e.state = 'open'; e.timer = 0; }
+      break;
+    case 'spawn': // it releases more cells
+      if (e.timer === 20) {
+        const n = L.ents.filter(o => o.alive && o.type === 'pa').length;
+        for (let k = 0; k < (angry ? 3 : 2) && n + k < 8; k++) spawnEnemy('pa', e.bx + (k - 1) * 40, e.by - 100);
+      }
+      if (e.timer > 50) { e.state = 'open'; e.timer = 0; }
+      break;
+    case 'open': // the alginate shell thins: its weak spot is exposed
+      e.open = Math.min(1, e.open + 0.08);
+      if (e.timer > (angry ? 110 : 150)) { e.state = 'close'; e.timer = 0; }
+      break;
+    case 'close':
+      e.open = Math.max(0, e.open - 0.08);
+      if (e.open === 0) { e.state = angry ? 'slam' : 'walk'; e.timer = 0; e.vy = angry ? -11 : 0; }
+      break;
+    case 'slam': // jumps and crashes down
+      e.vy += 0.5; e.jy += e.vy;
+      e.bx = clamp(e.bx + Math.sign(pcx - e.bx) * 2.2, lo, hi);
+      if (e.jy >= 0) {
+        e.jy = 0; e.vy = 0; G.shake = 14; AUDIO.play('stomp');
+        for (let k = 0; k < 6; k++) bossGlob(e, Math.cos(Math.PI + k * Math.PI / 5) * 4, -5 - Math.random() * 2);
+        e.state = 'walk'; e.timer = 0;
+      }
+      break;
+  }
+  const b = bossBox(e);
+  if (overlap(P, b)) {
+    if (P.vy > 0 && P.y + P.h - P.vy <= b.y + 14) {
+      P.vy = JUMP_V * 0.85; P.sprung = false;
+      if (e.open > 0.6) damageBoss(e, 2);
+      else { AUDIO.play('boing'); once('shell', 'The alginate shell is too tough to stomp. Wait until it opens, or shoot it!'); }
+    } else hurt('enemy', 'The mucoid colony crashed into you.');
+  }
+}
+
+// ---- coughing (CF level): the airway shakes and more P. aeruginosa appear ---------
+function updateCough() {
+  if (!L.def.theme.cough) return;
+  if (L.coughFlash > 0) L.coughFlash--;
+  if (L.coughing > 0) {
+    L.coughing--;
+    const k = Math.sin((1 - L.coughing / 100) * Math.PI);
+    G.shake = Math.max(G.shake, 4 + 10 * k);
+    if (!P.onGround) P.vy -= 0.28 * k;       // the air rushes up the airway
+    P.vx += (Math.random() - 0.5) * 1.3 * k;
+    return;
+  }
+  if (L.coughWarn > 0) L.coughWarn--;
+  if (--L.coughNext === 75) { L.coughWarn = 75; AUDIO.play('warn'); }
+  if (L.coughNext <= 0) {
+    L.coughNext = 60 * (24 + Math.random() * 22);   // next cough in 24-46 s
+    L.coughing = 100; L.coughFlash = 45;
+    AUDIO.play('cough');
+    const alive = L.ents.filter(e => e.alive && e.type === 'pa').length + L.spawnQ.length;
+    for (let i = 0, made = 0; i < 12 && made < Math.min(3, 12 - alive); i++) {
+      const x = clamp(P.x + (Math.random() < 0.5 ? -1 : 1) * (180 + Math.random() * 200), 2 * TILE, (L.cols - 2) * TILE);
+      const y = clamp(P.y - 40 - Math.random() * 160, TILE, (L.rows - 2) * TILE);
+      if (!isSolid(tileAt(Math.floor(x / TILE), Math.floor(y / TILE)))) { spawnEnemy('pa', x, y); made++; }
+    }
+    toast('Cough! The airway shakes and stirs up more P. aeruginosa.', 160);
+  }
 }
 
 // ---- level goals -------------------------------------------------------------------
@@ -507,6 +636,7 @@ function goalStatus(g) {
     case 'pep': return { done: L.peptides >= L.totalPep, text: `${g.label} (${L.peptides}/${L.totalPep})` };
     case 'reps': return { done: P.reps === 3, text: g.label };
     case 'kills': return { done: L.kills >= g.n, text: `${g.label} (${Math.min(L.kills, g.n)}/${g.n})` };
+    case 'boss': return { done: L.bossDown, text: g.label };
     default: return { done: true, text: g.label };   // 'time': the pulse clock checks it
   }
 }
@@ -671,7 +801,7 @@ function gain(base, x, y, color) {
 
 // ---- damage ----------------------------------------------------------------------
 function loseReplicate(msg) {
-  P.reps--;
+  P.reps--; P.repFlash = 50;
   toast(P.reps > 0 ? `${msg}  Replicates left: ${P.reps}/3` : msg);
   if (P.reps <= 0) { setState('gameOver'); AUDIO.play('fail'); }
 }
@@ -716,6 +846,7 @@ function updatePlay() {
   updateMovers();
   updateBlocks();
   updateLysis();
+  updateCough();
   L.solids = dynSolids();
   L.plats = L.movers.concat(L.ents.filter(e => e.type === 'shuttle'));
   // Ride along with the platform you stand on.
@@ -792,7 +923,7 @@ function updatePlay() {
     else if (c === '>') P.belt = 1.5;
   }
 
-  for (const t of ['inv', 'slow', 'shield', 'magnet', 'phos', 'gold']) if (P[t] > 0) P[t]--;
+  for (const t of ['inv', 'slow', 'shield', 'magnet', 'phos', 'gold', 'repFlash']) if (P[t] > 0) P[t]--;
 
   if (inFoam()) hurt('foam', 'Rhamnolipid foam damaged your membrane.');
   if (G.state !== 'play') return;
@@ -894,14 +1025,44 @@ function updateEntities() {
         enemyContact(e, 'An outer membrane vesicle (OMV) of P. aeruginosa delivered its cargo into you.');
         break;
       }
+      case 'boss': updateBoss(e, pcx); break;
+      case 'glob': { // a pyocyanin glob spat by the boss
+        e.vy = Math.min(e.vy + 0.3, 9); e.x += e.vx; e.y += e.vy;
+        if (isSolid(tileAt(Math.floor((e.x + 16) / TILE), Math.floor((e.y + 20) / TILE))) || e.y > L.rows * TILE) {
+          e.alive = false; burst(e.x + 16, e.y + 16, '#3d86d9', 6, 1.8, 0.1, 18); break;
+        }
+        if (overlap(P, { x: e.x + 9, y: e.y + 9, w: 14, h: 14 })) { e.alive = false; hurt('ros', 'Pyocyanin from the colony made ROS in your cell.'); }
+        break;
+      }
+      case 'rosgun': { // pyocyanin redox launcher: fires superoxide radicals at you
+        if (e.cool > 0) e.cool--;
+        const dx = pcx - cx;
+        e.face = dx >= 0 ? 1 : -1;
+        if (e.cool === 0 && Math.abs(dx) > 40 && Math.abs(dx) < 620 && Math.abs(pcy - cy) < 150) {
+          e.cool = 170;
+          spawnEnemy('rosb', cx + e.face * 20, cy - 4, { vx: e.face * 3.2 });
+          burst(cx + e.face * 18, cy - 4, '#ffb36b', 8, 2, 0, 16);
+          AUDIO.play('shoot');
+          once('rosgun', 'Superoxide (O₂•⁻)! Pyocyanin redox cycling makes these ROS. Jump over them, stomp them, or shoot them.');
+        }
+        break;
+      }
+      case 'rosb': { // a superoxide radical flying straight ahead
+        e.x += e.vx;
+        if (isSolid(tileAt(Math.floor((e.x + 16 + Math.sign(e.vx) * 14) / TILE), Math.floor((e.y + 16) / TILE))) || e.t > 420) {
+          e.alive = false; burst(e.x + 16, e.y + 16, '#ff7a3c', 10, 2.2, 0.05, 20); break;
+        }
+        enemyContact(e, 'A superoxide radical (ROS) hit you.', 'ros');
+        break;
+      }
       case 'lasb': // LasB elastase: a protease that drifts in loops
-        e.cx = e.hx + Math.sin(e.t * 0.018) * 90; e.cy = e.hy + Math.sin(e.t * 0.045) * 24;
-        e.face = Math.cos(e.t * 0.018) >= 0 ? 1 : -1;
+        e.cx = e.hx + Math.sin(e.t * 0.022) * 90; e.cy = e.hy + Math.sin(e.t * 0.05) * 24;
+        e.face = Math.cos(e.t * 0.022) >= 0 ? 1 : -1;
         enemyContact(e, 'LasB elastase, another P. aeruginosa protease, hit you.');
         break;
       case 'hcn': { // a vent that puffs hydrogen cyanide now and then
-        const ph = e.t % 260;
-        e.warn = ph > 140 && ph <= 170; e.active = ph > 170;
+        const ph = e.t % 220;
+        e.warn = ph > 110 && ph <= 140; e.active = ph > 140;
         if (e.active && overlap(P, { x: e.x - 18, y: e.y - 60, w: 68, h: 92 })) hurt('hcn', 'HCN (hydrogen cyanide) blocked your respiration.');
         break;
       }
@@ -910,8 +1071,8 @@ function updateEntities() {
         let tx = e.hx + Math.sin(e.t * 0.02) * 50, ty = e.hy + Math.cos(e.t * 0.03) * 20;
         if (d < 260) { tx = pcx; ty = pcy; }
         const hd = dist(tx, ty, e.hx, e.hy);
-        if (hd > 150) { tx = e.hx + (tx - e.hx) / hd * 150; ty = e.hy + (ty - e.hy) / hd * 150; }
-        const dd = dist(tx, ty, e.cx, e.cy), sp = d < 260 ? 1.0 : 0.6;
+        if (hd > 180) { tx = e.hx + (tx - e.hx) / hd * 180; ty = e.hy + (ty - e.hy) / hd * 180; }
+        const dd = dist(tx, ty, e.cx, e.cy), sp = d < 260 ? 1.25 : 0.6;
         if (dd > 1) { e.cx += (tx - e.cx) / dd * sp; e.cy += (ty - e.cy) / dd * sp; e.ang = Math.atan2(ty - e.cy, tx - e.cx); }
         enemyContact(e, 'A P. aeruginosa cell attacked you.');
         break;
@@ -960,6 +1121,7 @@ function updateEntities() {
         if (!e.on && Math.abs(cx - pcx) < 20 && Math.abs(cy - pcy) < 40) {
           for (const o of L.ents) if (o.type === 'check') o.on = false;
           e.on = true; L.respawn = { x: e.x + 4, y: e.y + 4 };
+          if (!e.saved) { e.saved = true; L.stocks++; }
           burst(cx, cy, '#bfe6ff', 14, 2.4, -0.03);
           AUDIO.play('check');
           toast('Glycerol stock saved: you will restart here.', 140);
@@ -997,7 +1159,7 @@ function updateEntities() {
         break;
       case 'dripper':
         // Wait until the player is near, then drop pyocyanin every ~1.6 s.
-        if (Math.abs(cx - pcx) < VIEW_W * 0.7 && Math.abs(cy - pcy) < VIEW_H && e.t % 100 === 0) {
+        if (Math.abs(cx - pcx) < VIEW_W * 0.7 && Math.abs(cy - pcy) < VIEW_H && e.t % 80 === 0) {
           spawned.push({ type: 'drop', x: e.x + 12, y: e.y + 26, vy: 0, alive: true, t: 0 });
         }
         break;
@@ -1027,7 +1189,7 @@ function updateEntities() {
         // Patrol; charge when the player is close on the same level. Turn at walls, ledges, foam.
         const ex = e.x + e.w / 2, ey = e.y + e.h / 2;
         e.angry = Math.abs(pcy - ey) < 30 && Math.abs(pcx - ex) < 190 && P.inv === 0;
-        e.vx = e.angry ? (Math.sign(pcx - ex) || 1) * 2.3 : Math.sign(e.vx) * 1.1;
+        e.vx = e.angry ? (Math.sign(pcx - ex) || 1) * 2.7 : Math.sign(e.vx) * 1.3;
         const nx = e.x + e.vx;
         const front = e.vx < 0 ? nx : nx + e.w;
         const ftx = Math.floor(front / TILE), fty = Math.floor((e.y + e.h - 1) / TILE);
@@ -1067,8 +1229,9 @@ function updateEntities() {
     }
   }
   if (spawned.length) L.ents.push(...spawned);
+  if (L.spawnQ.length) { L.ents.push(...L.spawnQ); L.spawnQ = []; }
   // Remove dead drops so the list does not grow forever.
-  if (L.time % 120 === 0) L.ents = L.ents.filter(e => e.alive || e.type !== 'drop');
+  if (L.time % 120 === 0) L.ents = L.ents.filter(e => e.alive || !['drop', 'glob', 'rosb', 'pa'].includes(e.type));
 }
 
 function finishLevel() {
@@ -1304,7 +1467,44 @@ function buildLevelArt(b, th, seed) {
 
   const sky = ctx.createLinearGradient(0, 0, 0, VIEW_H);
   sky.addColorStop(0, th.sky[0]); sky.addColorStop(1, th.sky[1]);
-  return { tiles, far, dots, fore, sky };
+  // Middle layer (parallax 0.45): biofilm "mushroom" towers, or airway rings in the CF level.
+  const mw = Math.ceil(W * 0.45 + VIEW_W), mh = Math.ceil(H * 0.45 + VIEW_H);
+  const mid = document.createElement('canvas');
+  mid.width = mw; mid.height = mh;
+  const m = mid.getContext('2d');
+  if (th.bg === 'cf') {
+    for (let y = 60; y < mh; y += 150) {           // cartilage rings of the airway wall
+      m.strokeStyle = rgba(th.far, 0.22); m.lineWidth = 26;
+      m.beginPath(); m.ellipse(mw / 2, y, mw * 0.62, 40, 0, Math.PI * 0.05, Math.PI * 0.95); m.stroke();
+      m.strokeStyle = 'rgba(255,255,255,0.12)'; m.lineWidth = 6;
+      m.beginPath(); m.ellipse(mw / 2, y - 8, mw * 0.62, 40, 0, Math.PI * 0.1, Math.PI * 0.9); m.stroke();
+    }
+    for (let i = 0; i < 16; i++) {                  // small blood vessels
+      m.strokeStyle = 'rgba(190,40,70,0.13)'; m.lineWidth = 1.5 + rnd() * 2;
+      let x = rnd() * mw, y = rnd() * mh;
+      m.beginPath(); m.moveTo(x, y);
+      for (let k = 0; k < 12; k++) { x += (rnd() - 0.5) * 60; y += 30 + rnd() * 30; m.lineTo(x, y); }
+      m.stroke();
+    }
+  } else {
+    for (let gy = mh; gy > 0; gy -= 380) {          // towers at several heights
+      for (let x = rnd() * 80; x < mw; x += 90 + rnd() * 140) {
+        const h = 120 + rnd() * 200, sw = 16 + rnd() * 18, cr = 34 + rnd() * 34;
+        m.fillStyle = rgba(th.far, 0.14 + rnd() * 0.08);
+        m.beginPath(); m.moveTo(x - sw, gy); m.quadraticCurveTo(x - sw * 0.4, gy - h * 0.5, x - sw * 0.5, gy - h);
+        m.lineTo(x + sw * 0.5, gy - h); m.quadraticCurveTo(x + sw * 0.4, gy - h * 0.5, x + sw, gy); m.closePath(); m.fill();
+        for (let k = 0; k < 7; k++) {
+          const a = Math.PI + rnd() * Math.PI, d = rnd() * cr;
+          m.beginPath(); m.arc(x + Math.cos(a) * d, gy - h + Math.sin(a) * d * 0.6, cr * (0.35 + rnd() * 0.3), 0, TAU); m.fill();
+        }
+      }
+    }
+  }
+  // Flowing particles (parallax 0.7) and big soft clouds (parallax 0.3).
+  const stream = Array.from({ length: 34 }, () => ({ x: rnd() * (VIEW_W + 100), y: rnd() * (VIEW_H + 100), v: 0.6 + rnd() * 1.2, len: 10 + rnd() * 26, r: 1 + rnd() * 2.5 }));
+  const blobs = Array.from({ length: 5 }, () => ({ x: rnd() * (VIEW_W + 400), y: rnd() * (VIEW_H + 400), r: 120 + rnd() * 160, v: 0.1 + rnd() * 0.2, ph: rnd() * TAU }));
+
+  return { tiles, far, dots, fore, sky, mid, stream, blobs };
 }
 
 // Edge darkening, drawn once.
@@ -1396,6 +1596,32 @@ function drawCoccus(cx, cy, r, ring, o = {}) {
   ctx.strokeStyle = '#7a4a08'; ctx.lineWidth = 1.4 * s; ctx.beginPath(); ctx.arc(f * 2 * s, 3.5 * s, 3 * s, 0.2, Math.PI - 0.2); ctx.stroke();
   ctx.restore();
 }
+// A culture flask (one replicate): golden broth when alive, empty when lost.
+function drawFlask(x, y, full, flash) {
+  const path = () => {
+    ctx.beginPath(); ctx.moveTo(x - 3, y - 11); ctx.lineTo(x - 3, y - 5); ctx.lineTo(x - 9, y + 8);
+    ctx.quadraticCurveTo(x - 10, y + 11, x - 6, y + 11); ctx.lineTo(x + 6, y + 11);
+    ctx.quadraticCurveTo(x + 10, y + 11, x + 9, y + 8); ctx.lineTo(x + 3, y - 5); ctx.lineTo(x + 3, y - 11); ctx.closePath();
+  };
+  if (flash) glow(x, y, 20, '#ff4040', Math.min(0.7, flash / 50));
+  path(); ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fill();
+  if (full) {
+    ctx.save(); path(); ctx.clip();
+    const t = performance.now() / 400 + x;
+    const g = ctx.createLinearGradient(0, y, 0, y + 11);
+    g.addColorStop(0, '#ffe27a'); g.addColorStop(1, '#d99a12');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(x - 12, y + 12);
+    for (let k = -12; k <= 12; k += 3) ctx.lineTo(x + k, y + 1 + Math.sin(t + k * 0.5) * 1.2);
+    ctx.lineTo(x + 12, y + 12); ctx.closePath(); ctx.fill();
+    for (const [dx, dy] of [[-4, 7], [2, 5], [5, 8], [-1, 9]]) circle(x + dx, y + dy, 1.1, 'rgba(255,250,220,0.8)');
+    ctx.restore();
+  } else {
+    ctx.strokeStyle = 'rgba(255,120,110,0.8)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x - 4, y + 3); ctx.lineTo(x, y + 6); ctx.lineTo(x - 2, y + 9); ctx.stroke();
+  }
+  path(); ctx.strokeStyle = full ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5; ctx.stroke();
+  roundRect(x - 4, y - 15, 8, 5, 2, full ? '#f2efe6' : 'rgba(242,239,230,0.4)');   // cotton plug
+}
 function drawCystineIcon(x, y, s = 1, bob = 0) {
   ctx.strokeStyle = '#8a6d00'; ctx.lineWidth = 3 * s;
   ctx.beginPath(); ctx.moveTo(x - 7 * s, y + bob); ctx.lineTo(x + 7 * s, y + bob); ctx.stroke();
@@ -1427,7 +1653,35 @@ function drawBackground(th, cx, cy) {
     const x = ((i * 310 - cx * 0.08) % 1240 + 1240) % 1240 - 160;
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 70, 0); ctx.lineTo(x + 230, VIEW_H); ctx.lineTo(x + 120, VIEW_H); ctx.fill();
   }
+  const t = L.time, bg = th.bg || 'tsb';
+  // Big soft clouds: golden haze (TSB), blue pyocyanin swirls (PASN), breath (CF).
+  const W2 = VIEW_W + 400, H2 = VIEW_H + 400;
+  for (const b of L.art.blobs) {
+    b.x += b.v;
+    const x = ((b.x - cx * 0.3) % W2 + W2) % W2 - 200, y = ((b.y - cy * 0.3) % H2 + H2) % H2 - 200;
+    glow(x, y + Math.sin(t * 0.01 + b.ph) * 20, b.r, bg === 'pasn' ? '#3d7fd6' : bg === 'cf' ? '#ff9fb0' : '#ffd36a', bg === 'pasn' ? 0.13 : 0.1);
+  }
   ctx.drawImage(L.art.far, cx * 0.25, cy * 0.25, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+  // Middle layer; in the CF level it moves with the breathing.
+  if (bg === 'cf') {
+    const s = 1 + 0.02 * Math.sin(t * 0.025);
+    ctx.save(); ctx.translate(VIEW_W / 2, VIEW_H / 2); ctx.scale(s, s); ctx.translate(-VIEW_W / 2, -VIEW_H / 2);
+    ctx.drawImage(L.art.mid, cx * 0.45, cy * 0.45, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+    ctx.restore();
+    ctx.fillStyle = `rgba(255,190,200,${0.04 * (1 + Math.sin(t * 0.025))})`; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  } else ctx.drawImage(L.art.mid, cx * 0.45, cy * 0.45, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+  // Moving bands of light.
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = 'rgba(255,255,255,0.045)'; ctx.lineWidth = 34;
+  for (let k = 0; k < 3; k++) {
+    ctx.beginPath();
+    for (let x = -24; x <= VIEW_W + 24; x += 24) {
+      const y = 90 + k * 170 + Math.sin(x * 0.008 + t * 0.015 + k * 2) * 28 + Math.sin(x * 0.02 - t * 0.02) * 8 - ((cy * 0.15) % 170);
+      if (x === -24) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
   // Molecules, at 1/2 speed.
   const W = VIEW_W + 40, H = VIEW_H + 40;
   for (const d of L.art.dots) {
@@ -1438,6 +1692,17 @@ function drawBackground(th, cx, cy) {
     } else if (d.kind === 'pyo') {
       glow(x, y, d.r * 3, '#2b6fd0', 0.35); circle(x, y, d.r * 0.7, 'rgba(43,111,208,0.55)');
     } else circle(x, y, d.r * 0.6, rgba(th.mol, 0.22));
+  }
+  // Streams of particles: nutrient flow (TSB), secreted molecules (PASN), mucus moved up the airway (CF).
+  const [sdx, sdy, scol] = bg === 'cf' ? [0.15, -1, '#fff0f3'] : bg === 'pasn' ? [0.8, -0.5, '#bfe9ff'] : [1, -0.35, '#fff1c2'];
+  const W3 = VIEW_W + 100, H3 = VIEW_H + 100;
+  ctx.lineCap = 'round';
+  for (const s of L.art.stream) {
+    s.x += sdx * s.v; s.y += sdy * s.v;
+    const x = ((s.x - cx * 0.7) % W3 + W3) % W3 - 50, y = ((s.y - cy * 0.7) % H3 + H3) % H3 - 50;
+    ctx.strokeStyle = rgba(scol, 0.22); ctx.lineWidth = s.r;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - sdx * s.len, y - sdy * s.len); ctx.stroke();
+    circle(x, y, s.r * 0.8, rgba(scol, 0.45));
   }
 }
 
@@ -1616,7 +1881,7 @@ function drawEntities(cx, cy) {
   for (const e of L.ents) {
     if (!e.alive || e.type === 'start') continue;
     const x = e.x, y = e.y;
-    if (e.type !== 'shuttle' && e.type !== 'gate' && (x < cx - 140 || x > cx + VIEW_W + 140 || y < cy - 140 || y > cy + VIEW_H + 140)) continue;
+    if (e.type !== 'shuttle' && e.type !== 'gate' && e.type !== 'boss' && (x < cx - 140 || x > cx + VIEW_W + 140 || y < cy - 140 || y > cy + VIEW_H + 140)) continue;
     const bob = Math.sin((e.t + e.tx * 13) * 0.08) * 3;
     switch (e.type) {
       case 'cystine': { // two S atoms bonded: S–S, with an occasional twinkle
@@ -1877,9 +2142,10 @@ function drawEntities(cx, cy) {
         ctx.fillStyle = '#123247'; ctx.beginPath(); ctx.ellipse(X, Y, 14, 5, 0, 0, TAU); ctx.fill();
         ctx.strokeStyle = '#8fd2ff'; ctx.lineWidth = 2.5; ctx.stroke();
         for (let k = 0; k < 3; k++) { const yy = Y - ((e.t * 0.7 + k * 8) % 22); circle(X - 6 + k * 6, yy, 1.6, 'rgba(160,220,255,0.8)'); }
+        if (e.label) text(e.label, X, y + 4, { size: 10, color: '#1d4f73', align: 'center', weight: '800' });
         if (e.near) {
           ctx.globalAlpha = 0.6 + 0.4 * Math.sin(e.t * 0.2);
-          text('↓', X, y - 2 + Math.sin(e.t * 0.2) * 3, { size: 16, color: '#1d6fa3', align: 'center', weight: '900' });
+          text('↓', X, y - 8 + Math.sin(e.t * 0.2) * 3, { size: 16, color: '#1d6fa3', align: 'center', weight: '900' });
           ctx.globalAlpha = 1;
         }
         break;
@@ -1918,9 +2184,9 @@ function drawEntities(cx, cy) {
         const X = x + 16, base = y + TILE;
         roundRect(x + 6, base - 7, 20, 7, 3, '#6d6a7a', '#4a4756', 1.2);
         circle(X, base - 6, 3.5, '#2b2833');
-        const ph = e.t % 260;
+        const ph = e.t % 220;
         if (e.active || e.warn) {
-          const k = e.active ? Math.min(1, (ph - 170) / 20) : (ph - 140) / 30 * 0.3;
+          const k = e.active ? Math.min(1, (ph - 140) / 20) : (ph - 110) / 30 * 0.3;
           for (let i = 0; i < 6; i++) {
             const a = i * 1.1 + e.t * 0.03, rr = (14 + i * 3) * k + 4;
             const px = X + Math.sin(a) * 14 * k, py = base - 14 - i * 9 * k;
@@ -1955,6 +2221,44 @@ function drawEntities(cx, cy) {
         ctx.restore();
         break;
       }
+      case 'boss': drawBoss(e); break;
+      case 'glob': {
+        const g = ctx.createRadialGradient(x + 13, y + 13, 1, x + 16, y + 16, 8);
+        g.addColorStop(0, '#cfe3ff'); g.addColorStop(1, '#1f63c0');
+        glow(x + 16, y + 16, 14, '#2b6fd0', 0.4); circle(x + 16, y + 16, 7, g);
+        break;
+      }
+      case 'rosgun': { // pyocyanin redox launcher: a barrel with phenazine rings
+        const X = x + 16, base = y + TILE, f = e.face || 1, ready = e.cool < 30;
+        roundRect(x + 3, base - 10, 26, 10, 3, '#3a4660', '#232b3d', 1.5);
+        roundRect(x + 2, y + 4, 28, 20, 8, '#2d4f8a', '#1a2f57', 2);
+        roundRect(X + f * 10 - 5, y + 8, 10, 12, 3, '#1a2f57');
+        ctx.fillStyle = 'rgba(120,170,255,0.45)'; ctx.strokeStyle = '#9cc2ff'; ctx.lineWidth = 1.2;
+        for (const dx of [-6, 0, 6]) { hexagon(X - f * 2 + dx, y + 14, 3.6, Math.PI / 6); ctx.fill(); ctx.stroke(); }
+        if (ready) glow(X + f * 16, y + 14, 14, '#ff7a3c', 0.3 + 0.3 * Math.sin(e.t * 0.4));
+        break;
+      }
+      case 'rosb': { // superoxide radical: a hot O2 with an unpaired electron and a trail
+        const X = x + 16, Y = y + 16, d = Math.sign(e.vx) || 1;
+        for (let k = 1; k <= 5; k++) circle(X - d * k * 5, Y + Math.sin(e.t * 0.5 + k) * 1.5, 6 - k, `rgba(255,${120 + k * 20},60,${0.5 - k * 0.08})`);
+        glow(X, Y, 18, '#ff5a2a', 0.45);
+        ball(X - 4, Y, 6.5, '#ffe0c8', '#ff6a3a', '#b3261e'); ball(X + 4, Y, 6.5, '#ffe0c8', '#ff6a3a', '#b3261e');
+        text('O₂', X, Y + 3.5, { size: 8, color: '#fff', align: 'center', weight: '900' });
+        circle(X + d * 10, Y - 6, 2.3, '#fff8a0');   // the unpaired electron (the "•" in O₂•⁻)
+        break;
+      }
+      case 'arrow': { // a glowing trail of arrows: this way
+        const ang = { right: 0, down: Math.PI / 2, left: Math.PI, up: -Math.PI / 2 }[e.dir] || 0;
+        ctx.save(); ctx.translate(x + 16, y + 16); ctx.rotate(ang);
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        for (let k = 0; k < 3; k++) {
+          const a = 0.25 + 0.75 * ((k / 3 - e.t * 0.02) % 1 + 1) % 1;
+          ctx.strokeStyle = `rgba(255,255,255,${a})`; ctx.lineWidth = 3.5;
+          ctx.beginPath(); ctx.moveTo(-9 + k * 8, -7); ctx.lineTo(-3 + k * 8, 0); ctx.lineTo(-9 + k * 8, 7); ctx.stroke();
+        }
+        ctx.restore();
+        break;
+      }
       case 'shuttle': { // moving bridge: a chain of protein beads that runs while its signal is ON
         const on = !e.ch || L.chan[e.ch];
         ctx.save(); ctx.setLineDash([4, 8]); ctx.strokeStyle = on ? 'rgba(58,163,154,0.45)' : 'rgba(80,90,95,0.3)'; ctx.lineWidth = 2;
@@ -1986,6 +2290,38 @@ function drawEntities(cx, cy) {
     ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(X, Y, r, 0, TAU); ctx.stroke();
     ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.beginPath(); ctx.ellipse(X - r * 0.4, Y - r * 0.45, r * 0.22, r * 0.12, -0.6, 0, TAU); ctx.fill();
   }
+}
+
+// The mucoid colony: a wobbling alginate gel with rod-shaped cells inside.
+function drawBoss(e) {
+  const t = e.t, X = e.bx, B = e.by + e.jy, dead = e.state === 'dead';
+  ctx.save();
+  if (dead) ctx.globalAlpha = Math.max(0, 1 - e.timer / 90);
+  else if (e.hitT > 0 && e.hitT % 4 < 2) ctx.globalAlpha = 0.55;
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(X, e.by + 1, 46 - Math.min(20, -e.jy / 6), 7, 0, 0, TAU); ctx.fill();
+  const w = 50 + Math.sin(t * 0.08) * 3, h = 38 + Math.cos(t * 0.08) * 3, cy = B - h;
+  // the colony inside
+  if (e.open > 0) glow(X, cy, 34, '#ff6a8a', 0.5 * e.open + 0.15 * Math.sin(t * 0.3) * e.open);
+  for (let k = 0; k < 9; k++) {
+    const a = k * TAU / 9 + t * 0.01, r = 10 + (k % 3) * 9;
+    ctx.save(); ctx.translate(X + Math.cos(a) * r * 1.3, cy + Math.sin(a) * r * 0.8); ctx.rotate(a + t * 0.02);
+    roundRect(-8, -3.5, 16, 7, 3.5, '#5fae4f', '#2f6b28', 1);
+    ctx.restore();
+  }
+  // the alginate shell (thins out when "open")
+  const g = ctx.createRadialGradient(X - 16, cy - 14, 4, X, cy, w);
+  g.addColorStop(0, `rgba(230,255,200,${0.75 - 0.5 * e.open})`); g.addColorStop(1, `rgba(110,170,60,${0.85 - 0.55 * e.open})`);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(X, cy, w, h, 0, 0, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(60,110,40,0.9)'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.ellipse(X - 18, cy - 20, 14, 6, -0.4, 0, TAU); ctx.fill();
+  // eyes
+  const look = Math.sign((P.x + P.w / 2) - X) * 4;
+  for (const dx of [-14, 14]) {
+    circle(X + dx, cy - 6, 7, '#fff'); circle(X + dx + look, cy - 5, 3.5, '#13240d');
+    ctx.strokeStyle = '#2b4a1c'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(X + dx - 8, cy - 16 + (dx < 0 ? 0 : 3)); ctx.lineTo(X + dx + 8, cy - 16 + (dx < 0 ? 3 : 0)); ctx.stroke();
+  }
+  if (e.open > 0.6 && !dead) text('↓ stomp!', X, cy - h - 10 + Math.sin(t * 0.2) * 3, { size: 14, color: '#ff4d6d', align: 'center', weight: '900' });
+  ctx.restore();
 }
 
 function drawFx() {
@@ -2041,20 +2377,21 @@ function drawHUD() {
   roundRect(10, 8, VIEW_W - 20, 40, 14, 'rgba(14,26,36,0.78)');
   drawCoccus(32, 28, 10, S.colour, { face: 1 });
   text(`${S.label} · ${L.def.name}`, 50, 34, { size: 15, color: W, weight: '800' });
-  // Replicates as three little sample tubes.
-  for (let i = 0; i < 3; i++) {
-    const x = 184 + i * 18;
-    roundRect(x, 15, 11, 26, [2, 2, 6, 6], 'rgba(255,255,255,0.12)', 'rgba(255,255,255,0.6)', 1.5);
-    if (i < P.reps) roundRect(x + 2, 24, 7, 15, [0, 0, 4, 4], '#f3c22f');
-  }
-  text('replicates', 240, 33, { size: 12, color: dim });
-  drawCystineIcon(330, 28, 0.62);
+  // Replicates: three little culture flasks. A lost one is empty and flashes red.
+  for (let i = 0; i < 3; i++) drawFlask(192 + i * 24, 29, i < P.reps, i === P.reps && P.repFlash > 0 ? P.repFlash : 0);
+  text(`n = ${P.reps}`, 236, 34, { size: 12, color: P.reps < 3 ? '#ffb3a8' : dim, weight: '800' });
+  drawCystineIcon(300, 28, 0.62);
   const cg = L.def.goals.find(g => g.id === 'cys');
-  text(`${L.cystine}${cg ? '/' + cg.n : ''}`, 348, 34, { size: 15, color: cg && L.cystine >= cg.n ? '#8be28f' : W, weight: '800' });
-  drawIronIcon(406, 28, 0.75);
-  for (let i = 0; i < 3; i++) circle(424 + i * 12, 28, 4, i < L.ironBank ? '#e0743c' : 'rgba(255,255,255,0.22)');
-  text(`score ${G.score + L.points}`, 476, 34, { size: 15, color: W, weight: '700' });
-  let x = 600;
+  text(`${L.cystine}${cg ? '/' + cg.n : ''}`, 318, 34, { size: 15, color: cg && L.cystine >= cg.n ? '#8be28f' : W, weight: '800' });
+  drawIronIcon(372, 28, 0.75);
+  for (let i = 0; i < 3; i++) circle(390 + i * 12, 28, 4, i < L.ironBank ? '#e0743c' : 'rgba(255,255,255,0.22)');
+  // glycerol stocks saved (checkpoints) out of the level's total
+  roundRect(434, 18, 8, 20, [1, 1, 4, 4], 'rgba(235,245,255,0.85)', 'rgba(255,255,255,0.7)', 1);
+  roundRect(435, 28, 6, 9, [0, 0, 3, 3], L.stocks ? '#f3c22f' : '#9aa6b2');
+  roundRect(432.5, 14, 11, 5, 1.5, L.stocks ? '#2eaa5c' : '#8a96a3');
+  text(`${L.stocks}/${L.totalStocks}`, 450, 34, { size: 15, color: W, weight: '800' });
+  text(`score ${G.score + L.points}`, 500, 34, { size: 15, color: W, weight: '700' });
+  let x = 620;
   const chip = (label, col) => {
     ctx.font = `800 12px ${FONT}`;
     const w = ctx.measureText(label).width + 16;
@@ -2075,6 +2412,26 @@ function drawHUD() {
     ctx.strokeStyle = urgent ? '#fff' : '#7fc4ff'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(VIEW_W - 134, 28, 8, -Math.PI / 2, -Math.PI / 2 + TAU * left / PULSE_S); ctx.stroke();
     text(`pulse ${mm}:${String(ss).padStart(2, '0')}`, VIEW_W - 30, 34, { size: 15, color: '#fff', align: 'right', weight: '800' });
+  }
+  // boss health
+  const boss = L.bossActive && L.ents.find(e => e.type === 'boss' && e.alive && e.state !== 'dead');
+  if (boss) {
+    text('mucoid P. aeruginosa colony', VIEW_W / 2, VIEW_H - 40, { size: 13, color: '#fff', align: 'center', weight: '800' });
+    roundRect(VIEW_W / 2 - 150, VIEW_H - 32, 300, 14, 7, 'rgba(14,26,36,0.75)');
+    roundRect(VIEW_W / 2 - 148, VIEW_H - 30, 296 * Math.max(0, boss.hp) / boss.maxHp, 10, 5, boss.open > 0.6 ? '#ff8aa0' : '#7bd34a');
+  }
+  // cough warning / cough
+  if (L.coughWarn > 0 && Math.floor(L.coughWarn / 8) % 2 === 0) {
+    roundRect(VIEW_W - 230, 54, 210, 28, 14, 'rgba(179,38,30,0.85)');
+    text('⚠ the patient is about to cough', VIEW_W - 125, 73, { size: 13, color: '#fff', align: 'center', weight: '800' });
+  }
+  if (L.coughFlash > 0) {
+    ctx.save(); ctx.globalAlpha = L.coughFlash / 45;
+    ctx.fillStyle = 'rgba(255,240,240,0.25)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.font = `900 ${60 + (45 - L.coughFlash)}px ${FONT}`; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+    ctx.lineWidth = 8; ctx.strokeStyle = '#7a1f2b'; ctx.strokeText('COUGH!', VIEW_W / 2, 200);
+    ctx.fillStyle = '#ffe3e3'; ctx.fillText('COUGH!', VIEW_W / 2, 200);
+    ctx.restore();
   }
   if (G.toastT > 0 && G.toast) {
     const lines = wrap(G.toast, 560, 16);
