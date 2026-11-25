@@ -16,10 +16,13 @@
     <div id="stage">
       <div id="game-view">
       <canvas id="game" width="960" height="544" aria-label="JE2 Jump game"></canvas>
-      <section id="run-settings" class="run-settings" aria-label="Run settings">
-        <div class="setting-heading"><label for="difficulty">Run difficulty</label><output id="difficulty-value" for="difficulty">Normal · 100%</output></div>
-        <div class="difficulty-track"><span>Study</span><input id="difficulty" type="range" min="0" max="100" step="25" value="100" aria-describedby="difficulty-help"><span>Normal</span></div>
-        <p id="difficulty-help">Original pace, hazards and records.</p>
+      <section id="run-settings" class="run-settings" aria-label="Difficulty">
+        <div class="difficulty-buttons" role="group" aria-label="Run difficulty" aria-describedby="difficulty-help">
+          <button id="mode-study" type="button" data-difficulty="0" aria-pressed="false">Study</button>
+          <button id="mode-normal" type="button" data-difficulty="100" aria-pressed="true">Normal</button>
+          <button id="mode-hard" type="button" data-difficulty="150" aria-pressed="false">Hard</button>
+        </div>
+        <p id="difficulty-help" aria-live="polite">The original challenge.</p>
       </section>
       <div id="touch" hidden>
         <button data-key="pause" class="pause" aria-label="pause or resume">Ⅱ</button>

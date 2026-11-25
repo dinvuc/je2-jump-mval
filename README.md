@@ -68,16 +68,16 @@ browser storage. Your best run records a translucent personal ghost (G toggles i
 with at most 12,000 positions, approximately 20 minutes. Everything stays in your
 browser; storage failure never prevents play. Medal targets still need player tuning.
 
-**Study runs:** the main-menu difficulty slider starts at **Normal (100%)**, which
-keeps the original gameplay and records. Move it left to Gentle (75%), Guided
-(50%), Relaxed (25%) or Study (0%). Lower settings slow the whole world for more
-reaction time, lengthen protection after hits, make jump timing more forgiving,
-and extend the SNpulse game deadline. Jump arcs, routes and strain abilities stay
-the same. At 0%, hits and falls cost no replicates, the pulse has no deadline,
-and checkpoint retries have no time penalty. The real experiment's pulse was
-still 15 minutes; changing the slider only changes the game.
+**Difficulty:** choose one of three main-menu buttons. **Normal** is selected by
+default and keeps the original gameplay and records. **Study** slows the world
+to 55% pace and makes jump timing more forgiving; hits and falls cost no
+replicates, the pulse has no deadline, and checkpoint retries have no time
+penalty. **Hard** runs at 115% pace and halves protection after hits, from 1.5 to
+0.75 game seconds. It keeps Normal's pulse deadline and jump timing. Jump arcs,
+routes and strain abilities stay the same in all modes. The real experiment's
+pulse was still 15 minutes; difficulty only changes the game.
 
-Below 100%, new encounters open biology notes with the world and clock paused.
+In Study, new encounters open biology notes with the world and clock paused.
 The 21 topics cover exposure histories, phosphorylation, nutrient uptake,
 translation, proteomics, secreted products, oxidative defenses, airway biology
 and replication. Each card separates biology from the game's metaphor. Press
@@ -85,8 +85,8 @@ Enter/Space or tap to continue; press B during play or choose **Review biology
 notes** when paused to revisit discovered notes. Use left/right or the on-screen
 Previous/Next controls to browse, then Enter or the center button to return.
 Times, ghosts and best scores are stored separately for each difficulty, so
-study runs cannot replace Normal records. The slider also supports native
-keyboard controls; Enter starts the selected run after adjusting it.
+Study and Hard runs cannot replace Normal records. Tab to a difficulty button
+and use Enter/Space to select it, or click/tap it, then choose a strain to start.
 
 **Checkpoint retry (R):** restore the world, inventory and replicates saved at the
 last cryo-vial, or the starting position. Time continues and adds a 3 s penalty.
@@ -253,7 +253,7 @@ moving surfaces and crumbling platforms unavailable, and checks entry and return
 routes for the peptide detours. This proves a permanent main terrain route;
 it does not certify hazard balance, reaction time or visual layout
 in a browser. tests/harness.cjs supplies a mock Canvas environment.
-Study checks also cover the slider, paused note transitions, easier timing and
+Difficulty checks also cover the three buttons, Hard pacing, paused note transitions, easier timing and
 damage rules, unchanged terrain, and separation of Normal/study records.
 
 ## License

@@ -35,7 +35,7 @@ function medalTargets(def, strain = G.strain) {
 }
 function runKey(def = L.def, strain = G.strain) {
   const key = `${RUN_VERSION}:${def.name}:${strain}`;
-  return G.difficulty < 100 ? `${key}:study:${G.difficulty}` : key;
+  return G.difficulty < 100 ? `${key}:study:${G.difficulty}` : G.difficulty > 100 ? `${key}:hard` : key;
 }
 function loadGhost() {
   try {
@@ -129,9 +129,9 @@ function drawAbilityHUD() {
     text(ahead > 0 ? ahead + ' tiles clear' : 'Sources fire faster', 866, 94, { size: 12, color: '#e6f3fa', align: 'center' });
   }
   text('R retry stock · G ghost ' + (G.ghostOn ? 'on' : 'off'), VIEW_W - 18, VIEW_H - 14, { size: 12, color: '#f5fcff', align: 'right', weight: '700' });
-  if (L.difficulty < 100) {
+  if (L.difficulty !== 100) {
     roundRect(210, 58, 250, 30, 10, 'rgba(10,31,43,0.92)', '#a7e0d4', 1);
-    text(`STUDY · ${L.difficulty}% · B biology notes`, 222, 78, { size: 12, color: '#c3ffdf', weight: '800' });
+    text(L.difficulty < 100 ? 'STUDY · B biology notes' : 'HARD · faster pace', 222, 78, { size: 12, color: '#c3ffdf', weight: '800' });
   }
 }
 
@@ -156,22 +156,17 @@ function drawExposureFront(cx, cy) {
   ctx.stroke(); ctx.restore();
 }
 
-// Slower fixed steps retain jump arcs, terrain and strain abilities.
+// Changing the fixed-step cadence retains jump arcs, terrain and strain abilities.
 // Normal mode never uses this path.
-function studyPace(difficulty) { return 0.55 + 0.45 * difficulty / 100; }
+function studyPace(difficulty) { return difficulty > 100 ? 1.15 : 0.55 + 0.45 * difficulty / 100; }
 function difficultyLabel(difficulty) {
-  return ({ 0: 'Study', 25: 'Relaxed', 50: 'Guided', 75: 'Gentle', 100: 'Normal' })[difficulty];
+  return difficulty < 100 ? 'Study' : difficulty > 100 ? 'Hard' : 'Normal';
 }
 function syncDifficultyControl() {
-  if (!difficultySlider) return;
-  const value = G.difficulty, label = `${difficultyLabel(value)} · ${value}%`;
-  const description = value === 100 ? 'Original pace, hazards and records.'
-    : value === 0 ? '55% pace · no damage or deadline · pausing biology notes.'
-    : `${Math.round(studyPace(value) * 100)}% pace · more time and hit protection · pausing biology notes.`;
-  difficultySlider.value = value;
-  difficultySlider.setAttribute('aria-valuetext', label);
-  document.getElementById('difficulty-value').textContent = label;
-  document.getElementById('difficulty-help').textContent = description;
+  for (const button of difficultyButtons) button.setAttribute('aria-pressed', String(Number(button.dataset.difficulty) === G.difficulty));
+  const help = document.getElementById('difficulty-help');
+  if (help) help.textContent = G.difficulty < 100 ? 'Explore, learn biology, keep your replicates.'
+    : G.difficulty > 100 ? 'Faster pace. Shorter protection after hits.' : 'The original challenge.';
 }
 function openStudyNote(key, returnState = 'play') {
   G.studyKey = key; G.studyReturn = returnState;

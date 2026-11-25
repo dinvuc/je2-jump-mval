@@ -24,7 +24,7 @@ const ENEMIES = new Set(['lasa', 'omv', 'lasb', 'pa', 'twitch', 'sidero', 'rosb'
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const runSettings = document.getElementById('run-settings');
-const difficultySlider = document.getElementById('difficulty');
+const difficultyButtons = ['mode-study', 'mode-normal', 'mode-hard'].map(id => document.getElementById(id)).filter(Boolean);
 configureCanvas();
 function resizeGame() {
   if (configureCanvas() && L) L.art = buildLevelArt(L, L.def.theme, G.levelIdx);
@@ -48,7 +48,7 @@ function press(k) { if (!keys[k]) pressed[k] = true; keys[k] = true; }
 function release(k) { keys[k] = false; }
 addEventListener('keydown', e => {
   AUDIO.unlock();
-  if (e.target === difficultySlider && e.code !== 'Enter') return; // Keep native range keys; Enter can still start.
+  if (difficultyButtons.includes(e.target)) return; // Native buttons handle Space/Enter without starting a run.
   const ks = KEYMAP[e.code];
   if (!ks) return;
   e.preventDefault();
@@ -274,7 +274,7 @@ canvas.addEventListener('pointerdown', e => {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
-function bestScoreKey() { return 'je2jump_v3_best' + (G.difficulty < 100 ? `_study_${G.difficulty}` : ''); }
+function bestScoreKey() { return 'je2jump_v3_best' + (G.difficulty < 100 ? `_study_${G.difficulty}` : G.difficulty > 100 ? '_hard' : ''); }
 function loadBest(key = 'je2jump_v3_best') { try { return Number(localStorage.getItem(key)) || 0; } catch { return 0; } }
 function saveBest(v) { try { localStorage.setItem(bestScoreKey(), String(v)); } catch { /* private mode */ } }
 // Best times per level (seconds), kept in this browser only.
@@ -316,14 +316,15 @@ G.ghostOn = true;
 let L = null;  // the running level
 let P = null;  // the player
 
-if (difficultySlider) {
-  difficultySlider.addEventListener('input', () => {
+for (const button of difficultyButtons) {
+  button.addEventListener('click', () => {
     if (G.state !== 'title') return;
-    G.difficulty = Number(difficultySlider.value);
+    G.difficulty = Number(button.dataset.difficulty);
     G.best = loadBest(bestScoreKey());
     syncDifficultyControl();
+    AUDIO.play('move');
   });
-  difficultySlider.addEventListener('focus', () => {
+  button.addEventListener('focus', () => {
     for (const k in keys) keys[k] = false;
     clearPressed();
   });
@@ -358,7 +359,7 @@ function loadLevel(i) {
     combo: 0, comboT: 0, kills: 0, peptides: 0, spawnQ: [],
     retries: 0,
     difficulty: G.difficulty,
-    timeLimit: def.timeLimit && G.difficulty > 0 ? Math.round(def.timeLimit * (1 + 2 * (1 - G.difficulty / 100))) : 0,
+    timeLimit: def.timeLimit && G.difficulty > 0 ? Math.round(def.timeLimit * (1 + 2 * Math.max(0, 1 - G.difficulty / 100))) : 0,
     recording: [], ghostIndex: 0,
     bossActive: false, bossDown: false, bg: b.bg, caveK: 0, jiggle: new Map(), goalSeen: {},
     abNext: 60 * (35 + Math.random() * 15), abWarn: 0, abOn: 0, abExpose: 0, covered: true,
@@ -852,7 +853,7 @@ function hurt(kind, msg) {
     toast('AhpC absorbed the ROS. Shield used up.');
     return;
   }
-  P.inv = 90 + Math.round(180 * (1 - L.difficulty / 100)); P.vy = -6; P.vx = -P.face * 3; P.dizzy = 80; P.damageT = 75;
+  P.inv = L.difficulty > 100 ? 45 : 90 + Math.round(180 * (1 - L.difficulty / 100)); P.vy = -6; P.vx = -P.face * 3; P.dizzy = 80; P.damageT = 75;
   P.damageLabel = ({ ros: 'ROS HIT', hcn: 'HCN HIT', foam: 'MEMBRANE HIT', enemy: 'CELL WALL HIT' })[kind] || 'REPLICATE LOST';
   burst(P.x + P.w / 2, P.y + P.h / 2, '#e0465a', 12, 3);
   G.shake = 10; AUDIO.play('hurt');
@@ -905,9 +906,9 @@ function updatePlay() {
   if (Math.abs(P.vx) < 0.05) P.vx = 0;
 
   // Jump, with coyote time and a small input buffer so it feels fair.
-  if (took('jump')) P.buffer = BUFFER + Math.round(6 * (1 - L.difficulty / 100)); else if (P.buffer > 0) P.buffer--;
+  if (took('jump')) P.buffer = BUFFER + Math.round(6 * Math.max(0, 1 - L.difficulty / 100)); else if (P.buffer > 0) P.buffer--;
   if (P.onGround) {
-    P.coyote = COYOTE + Math.round(12 * (1 - L.difficulty / 100)); P.groundT++; P.glide = 60;
+    P.coyote = COYOTE + Math.round(12 * Math.max(0, 1 - L.difficulty / 100)); P.groundT++; P.glide = 60;
     if (S.doubleJump > 0 && P.groundT >= S.recharge) P.djReady = true;
   } else { P.coyote--; P.groundT = 0; }
 
@@ -1332,13 +1333,15 @@ function update() {
       if (took('pause')) { G.menuIdx = 0; setState('paused'); AUDIO.play('click'); break; }
       if (L.difficulty < 100 && took('biology')) { reviewStudyNotes('play'); break; }
       if (G.hitStop > 0) { G.hitStop--; break; }   // a tiny freeze on big hits
-      if (L.difficulty < 100) {
-        if (showNearbyStudy()) break;
+      if (L.difficulty !== 100) {
+        if (L.difficulty < 100 && showNearbyStudy()) break;
         G.studyTick += studyPace(L.difficulty);
-        if (G.studyTick < 1) break;
-        G.studyTick -= 1;
-      }
-      updatePlay();
+        while (G.studyTick >= 1 && G.state === 'play') {
+          G.studyTick -= 1;
+          updatePlay();
+          if (G.hitStop > 0) { G.studyTick = 0; break; }
+        }
+      } else updatePlay();
       break;
     case 'study':
       if (G.studyReview) {
@@ -2715,7 +2718,7 @@ function draw() {
   const S = STRAINS[G.strain];
   switch (G.state) {
     case 'intro':
-      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), [L.difficulty < 100 ? `Study ${L.difficulty}% · ${Math.round(studyPace(L.difficulty) * 100)}% pace · biology notes pause the world` : `Medal times: gold ≤ ${fmtTime(medalTargets(L.def)[0])} · silver ≤ ${fmtTime(medalTargets(L.def)[1])} · bronze ≤ ${fmtTime(medalTargets(L.def)[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
+      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), [L.difficulty < 100 ? 'Study · relaxed pace · biology notes pause the world' : L.difficulty > 100 ? 'Hard · 15% faster pace · shorter protection after hits' : `Medal times: gold ≤ ${fmtTime(medalTargets(L.def)[0])} · silver ≤ ${fmtTime(medalTargets(L.def)[1])} · bronze ≤ ${fmtTime(medalTargets(L.def)[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
       break;
     case 'study':
       drawStudyNote();

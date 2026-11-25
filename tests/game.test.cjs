@@ -95,19 +95,30 @@ check('resizing and scaled pointer input preserve game and menu coordinates', ()
   assert.equal(run('G.strain'),'stp'); assert.equal(run('G.state'),'intro');
 });
 require('./routes.cjs')({run,reset,check});
-check('menu slider defaults to normal and keeps native keyboard input separate', () => {
+check('three difficulty buttons select a mode without starting or changing the strain', () => {
   reset(); run("setState('title'); G.strain='anc'; syncDifficultyControl();");
-  assert.equal(Number(controls.difficulty.value), 100);
+  assert.equal(controls['mode-normal'].attributes['aria-pressed'], 'true');
   assert.equal(controls['run-settings'].hidden, false);
-  events.keydown({ code: 'ArrowLeft', target: controls.difficulty, preventDefault() { throw new Error('native range key intercepted'); } });
+  events.keydown({ code: 'Space', target: controls['mode-study'], preventDefault() { throw new Error('native button key intercepted'); } });
   run('update();'); assert.equal(run('G.strain'), 'anc');
-  controls.difficulty.value = '50'; controls.difficulty.handlers.input();
-  assert.equal(run('G.difficulty'), 50);
-  assert.equal(controls.difficulty.attributes['aria-valuetext'], 'Guided · 50%');
-  events.keydown({ code: 'Enter', target: controls.difficulty, preventDefault() {} });
-  run('update();'); assert.equal(run('L.difficulty'), 50);
+  for (const [id, value] of [['mode-study',0],['mode-hard',150],['mode-normal',100]]) {
+    controls[id].handlers.click();
+    assert.equal(run('G.difficulty'), value); assert.equal(run('G.state'),'title');
+    assert.equal(controls[id].attributes['aria-pressed'], 'true');
+    assert.equal(Object.values(controls).filter(c=>c.attributes['aria-pressed']==='true').length,1);
+  }
+  controls['mode-study'].handlers.click();
+  run('startGame();'); assert.equal(run('L.difficulty'), 0);
   assert.equal(controls['run-settings'].hidden, true);
   run("setState('title');"); assert.equal(controls['run-settings'].hidden, false);
+});
+check('hard runs faster, shortens hit protection and keeps separate records', () => {
+  reset(0,'anc',150); run('for(let i=0;i<60;i++) update();');
+  assert.equal(run('G.state'),'play'); assert(run('L.time >= 68 && L.time <= 69'));
+  run("hurt('ros','test');"); assert.equal(run('P.inv'),45); assert.equal(run('P.reps'),2);
+  assert.equal(run('runKey()'),'3:TSB:anc:hard'); assert.equal(run('bestScoreKey()'),'je2jump_v3_best_hard');
+  reset(1,'anc',150); assert.equal(run('L.timeLimit'),145);
+  assert.equal(run('menuItems().length'),6); run('update(); draw();'); assert.equal(run('G.state'),'play');
 });
 check('lower difficulty slows the world while normal mode keeps the original cadence', () => {
   for (const difficulty of [0,25,50,75,100]) {
