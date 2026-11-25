@@ -25,6 +25,9 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const runSettings = document.getElementById('run-settings');
 const difficultyButtons = ['mode-study', 'mode-normal', 'mode-hard'].map(id => document.getElementById(id)).filter(Boolean);
+const studyControls = document.getElementById('study-controls');
+const studyPanel = document.getElementById('study-panel');
+const studyButtons = ['study-open', 'study-close', 'study-prev', 'study-next'].map(id => document.getElementById(id)).filter(Boolean);
 configureCanvas();
 function resizeGame() {
   if (configureCanvas() && L) L.art = buildLevelArt(L, L.def.theme, G.levelIdx);
@@ -48,7 +51,8 @@ function press(k) { if (!keys[k]) pressed[k] = true; keys[k] = true; }
 function release(k) { keys[k] = false; }
 addEventListener('keydown', e => {
   AUDIO.unlock();
-  if (difficultyButtons.includes(e.target)) return; // Native buttons handle Space/Enter without starting a run.
+  if (difficultyButtons.includes(e.target)) return;
+  if (studyButtons.includes(e.target) && ['Enter', 'Space'].includes(e.code)) return;
   const ks = KEYMAP[e.code];
   if (!ks) return;
   e.preventDefault();
@@ -261,10 +265,6 @@ canvas.addEventListener('pointerdown', e => {
     if (i >= 0) { G.menuIdx = i; menuSelect(); }
   } else if (G.state === 'gameOver' && y > 420 && y < 480) {
     pressed.retry = true;
-  } else if (G.state === 'study' && G.studyReview && y > 435 && x < 260) {
-    pressed.left = true;
-  } else if (G.state === 'study' && G.studyReview && y > 435 && x > 700) {
-    pressed.right = true;
   } else if (G.state !== 'play') {
     pressed.ok = true;
   }
@@ -330,13 +330,19 @@ for (const button of difficultyButtons) {
   });
 }
 syncDifficultyControl();
+for (const button of studyButtons) button.addEventListener('click', () => {
+  if (button.id === 'study-open') toggleStudyStation();
+  else if (button.id === 'study-close') { G.studyOpen = false; renderStudyStation(); }
+  else turnStudyPage(button.id === 'study-prev' ? -1 : 1);
+});
 
 function setState(s) {
   G.state = s; clearPressed();
   if (runSettings) runSettings.hidden = s !== 'title';
+  if (s !== 'play') { G.studyStation = null; G.studyOpen = false; renderStudyStation(); }
   touchBox.hidden = !matchMedia('(pointer: coarse)').matches || (s !== 'play' && s !== 'paused');
   AUDIO.music(s === 'title' ? 'title' : !L ? 'title' : L.bossActive && !L.bossDown ? 'boss' : L.def.name);
-  AUDIO.duck(s === 'paused' || s === 'study');
+  AUDIO.duck(s === 'paused');
   if (s !== 'play' && s !== 'paused') { AUDIO.muffle(false); AUDIO.intensity(0); }
   if (s === 'title') G.iris = 45;
 }
@@ -359,6 +365,7 @@ function loadLevel(i) {
     combo: 0, comboT: 0, kills: 0, peptides: 0, spawnQ: [],
     retries: 0,
     difficulty: G.difficulty,
+    studyStations: G.difficulty < 100 ? STUDY_STATIONS[i] : [],
     timeLimit: def.timeLimit && G.difficulty > 0 ? Math.round(def.timeLimit * (1 + 2 * Math.max(0, 1 - G.difficulty / 100))) : 0,
     recording: [], ghostIndex: 0,
     bossActive: false, bossDown: false, bg: b.bg, caveK: 0, jiggle: new Map(), goalSeen: {},
@@ -380,6 +387,7 @@ function loadLevel(i) {
     glide: 60, dash: 0, dashCool: 0, shootFlash: 0,
   };
   G.toast = ''; G.toastT = 0; G.failReason = ''; G.shake = 0; G.iris = 45; G.hitStop = 0; G.studyTick = 0;
+  G.studyStation = null; G.studyOpen = false; G.studyIndex = 0; renderStudyStation();
   for (const g of def.goals) L.goalSeen[g.id] = g.id === 'reps' || g.id === 'time';
   L.solids = [];
   L.ghost = loadGhost();
@@ -1290,7 +1298,6 @@ function finishLevel() {
 // ---- pause menu ------------------------------------------------------------------
 function menuItems() {
   const items = ['Resume', L.difficulty === 0 ? 'Retry checkpoint (free)' : 'Retry checkpoint (+3 s)', 'Restart level', `Sound effects: ${AUDIO.sfxOn ? 'on' : 'off'}`, `Music: ${AUDIO.musicOn ? 'on' : 'off'}`, 'Main menu'];
-  if (L.difficulty < 100) items.push('Review biology notes (B)');
   return items;
 }
 function menuRects() { return menuItems().map((_, i) => ({ x: VIEW_W / 2 - 170, y: (L.difficulty < 100 ? 154 : 158) + i * (L.difficulty < 100 ? 40 : 46), w: 340, h: L.difficulty < 100 ? 36 : 40 })); }
@@ -1303,7 +1310,6 @@ function menuSelect() {
     case 3: AUDIO.toggleSfx(); break;
     case 4: AUDIO.toggleMusic(); break;
     case 5: G.startLevel = G.levelIdx; setState('title'); break;
-    case 6: reviewStudyNotes('paused'); break;
   }
 }
 
@@ -1331,10 +1337,12 @@ function update() {
       break;
     case 'play':
       if (took('pause')) { G.menuIdx = 0; setState('paused'); AUDIO.play('click'); break; }
-      if (L.difficulty < 100 && took('biology')) { reviewStudyNotes('play'); break; }
+      if (L.difficulty < 100) {
+        syncStudyStation();
+        if (took('biology')) toggleStudyStation();
+      }
       if (G.hitStop > 0) { G.hitStop--; break; }   // a tiny freeze on big hits
       if (L.difficulty !== 100) {
-        if (L.difficulty < 100 && showNearbyStudy()) break;
         G.studyTick += studyPace(L.difficulty);
         while (G.studyTick >= 1 && G.state === 'play') {
           G.studyTick -= 1;
@@ -1342,24 +1350,11 @@ function update() {
           if (G.hitStop > 0) { G.studyTick = 0; break; }
         }
       } else updatePlay();
-      break;
-    case 'study':
-      if (G.studyReview) {
-        if (took('left')) G.studyIndex = (G.studyIndex + G.studyReview.length - 1) % G.studyReview.length;
-        if (took('right')) G.studyIndex = (G.studyIndex + 1) % G.studyReview.length;
-        G.studyKey = G.studyReview[G.studyIndex];
-      }
-      if (took('confirm') || took('ok') || took('jump') || took('pause')) {
-        const next = G.studyReturn;
-        G.studyReview = null;
-        for (const k in keys) keys[k] = false;
-        setState(next);
-      }
+      if (L.difficulty < 100) syncStudyStation();
       break;
     case 'paused': {
       const n = menuItems().length;
       if (took('pause')) { setState('play'); break; }
-      if (L.difficulty < 100 && took('biology')) { reviewStudyNotes('paused'); break; }
       if (took('up')) { G.menuIdx = (G.menuIdx + n - 1) % n; AUDIO.play('move'); }
       if (took('down')) { G.menuIdx = (G.menuIdx + 1) % n; AUDIO.play('move'); }
       if (took('confirm')) menuSelect();
@@ -2679,6 +2674,7 @@ function drawWorld() {
   drawFoam(cx, cy);
   drawLysis(cx, cy);
   drawSigns(cx, cy);
+  drawStudyStations();
   drawEntities(cx, cy);
   drawDamageFeedback();
   drawGhost();
@@ -2718,10 +2714,7 @@ function draw() {
   const S = STRAINS[G.strain];
   switch (G.state) {
     case 'intro':
-      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), [L.difficulty < 100 ? 'Study · relaxed pace · biology notes pause the world' : L.difficulty > 100 ? 'Hard · 15% faster pace · shorter protection after hits' : `Medal times: gold ≤ ${fmtTime(medalTargets(L.def)[0])} · silver ≤ ${fmtTime(medalTargets(L.def)[1])} · bronze ≤ ${fmtTime(medalTargets(L.def)[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
-      break;
-    case 'study':
-      drawStudyNote();
+      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), [L.difficulty < 100 ? 'Study · optional biology stations · B or click to read' : L.difficulty > 100 ? 'Hard · 15% faster pace · shorter protection after hits' : `Medal times: gold ≤ ${fmtTime(medalTargets(L.def)[0])} · silver ≤ ${fmtTime(medalTargets(L.def)[1])} · bronze ≤ ${fmtTime(medalTargets(L.def)[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
       break;
     case 'paused':
       drawPauseMenu();

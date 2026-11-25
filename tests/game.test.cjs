@@ -129,23 +129,28 @@ check('lower difficulty slows the world while normal mode keeps the original cad
     assert.equal(run('G.state'),'play');
   }
 });
-check('study notes freeze timers, open once per topic and can be reviewed by key or touch', () => {
-  reset(1,'stk',50); run('update();');
-  assert.equal(run('G.state'),'study'); assert.equal(run('G.studyKey'),'SNpulse');
-  run('for(let i=0;i<120;i++) { update(); if(i%30===0) draw(); }'); assert.equal(run('L.time'),0);
-  mainCanvas.handlers.pointerdown({clientX:480/2,clientY:455/2}); run('update();');
-  assert.equal(run('G.state'),'play'); run('update();');
-  assert.equal(run('G.studyKey'),'strain');
-  run('pressed.confirm=true; update();');
+check('station notes open only on request, keep movement live and close on departure', () => {
+  reset(0,'anc',0);
+  run('for(let i=0;i<120;i++) update();');
+  assert.equal(run('G.state'),'play'); assert.equal(controls['study-panel'].hidden,true);
+  run('var readingStation=L.studyStations[0]; P.x=readingStation.tx*TILE+4; P.y=readingStation.ty*TILE+4; syncStudyStation();');
+  assert.equal(controls['study-controls'].hidden,false); assert.equal(controls['study-panel'].hidden,true);
+  controls['study-open'].handlers.click();
+  assert.equal(controls['study-panel'].hidden,false); assert.equal(run('G.state'),'play');
+  assert.equal(controls['study-title'].textContent,run('STUDY_FACTS.TSB.title'));
+  const time=run('L.time'); run('for(let i=0;i<30;i++) update();'); assert(run('L.time')>time);
+  controls['study-next'].handlers.click(); assert.equal(controls['study-title'].textContent,run('STUDY_FACTS.strain.title'));
+  controls['study-prev'].handlers.click(); assert.equal(controls['study-title'].textContent,run('STUDY_FACTS.TSB.title'));
+  controls['study-close'].handlers.click(); assert.equal(controls['study-panel'].hidden,true);
+  run('pressed.biology=true; update();'); assert.equal(controls['study-panel'].hidden,false);
+  events.keydown({code:'KeyD',target:controls['study-open'],preventDefault(){}});
+  run('for(let i=0;i<50;i++) update();');
+  assert.equal(controls['study-panel'].hidden,true); assert.equal(controls['study-controls'].hidden,true);
   assert.equal(run('G.state'),'play');
-  run('pressed.biology=true; update();'); assert.equal(run('G.state'),'study');
-  assert.equal(run('G.studyReview.length'),2);
-  mainCanvas.handlers.pointerdown({clientX:800/2,clientY:455/2}); run('update();');
-  assert.equal(run('G.studyKey'),'strain');
-  run('pressed.confirm=true; update();'); assert.equal(run('G.state'),'play');
-  run("setState('paused'); pressed.biology=true; update();"); assert.equal(run('G.state'),'study');
-  run('pressed.pause=true; update();'); assert.equal(run('G.state'),'paused');
-  reset(1); run('update();'); assert.equal(run('G.state'),'play');
+  run('keys.right=false; P.x=readingStation.tx*TILE+4; P.y=readingStation.ty*TILE+4; P.vx=0; syncStudyStation();');
+  assert.equal(controls['study-controls'].hidden,false); assert.equal(controls['study-panel'].hidden,true);
+  controls['study-open'].handlers.click(); run("setState('paused');"); assert.equal(controls['study-panel'].hidden,true);
+  reset(0); run('pressed.biology=true; update();'); assert.equal(controls['study-controls'].hidden,true);
 });
 check('study assistance protects replicates, extends the pulse and permits free retries at zero', () => {
   reset(1,'anc',50); assert.equal(run('L.timeLimit'),290);
@@ -157,19 +162,25 @@ check('study assistance protects replicates, extends the pulse and permits free 
   reset(1); run("hurt('ros','test');"); assert.equal(run('P.inv'),90);
   assert.equal(run('L.timeLimit'),145);
 });
-check('study encounters cover all entity notes and terrain mechanisms without changing layouts', () => {
-  for (let level=0;level<4;level++) for (const strain of ['anc','stk','stp']) {
-    reset(level,strain); const terrain=run('JSON.stringify(L.grid)');
-    reset(level,strain,0); assert.equal(run('JSON.stringify(L.grid)'),terrain);
-    run('G.studySeen=Object.fromEntries(Object.keys(STUDY_FACTS).map(k=>[k,true])); for(let i=0;i<30;i++) update(); draw();');
-    assert.equal(run('G.state'),'play');
+check('stations cover all topics on permanent floors without changing the layouts', () => {
+  const topics=new Set();
+  for(let level=0;level<4;level++) {
+    reset(level); const terrain=run('JSON.stringify(L.grid)'); assert.equal(run('L.studyStations.length'),0);
+    reset(level,'anc',0); assert.equal(run('JSON.stringify(L.grid)'),terrain);
+    assert.equal(run('L.studyStations.length'),4);
+    assert(run("L.studyStations.every(s=>isSolid(tileAt(s.tx,s.ty+1)) || oneWay(tileAt(s.tx,s.ty+1)))"));
+    for(let index=0;index<4;index++) {
+      run('var station=L.studyStations['+index+']; P.x=station.tx*TILE+4; P.y=station.ty*TILE+4; syncStudyStation();');
+      assert.equal(controls['study-panel'].hidden,true);
+      controls['study-open'].handlers.click();
+      for(const key of run('station.topics')) {
+        topics.add(key); assert.equal(controls['study-title'].textContent,run('STUDY_FACTS['+JSON.stringify(key)+'].title'));
+        controls['study-next'].handlers.click();
+      }
+      controls['study-close'].handlers.click(); run('draw();');
+    }
   }
-  reset(2,'anc',50);
-  for (const [type,key] of Object.entries(run('STUDY_ENTITY_NOTES'))) {
-    run(`G.studySeen=Object.fromEntries(Object.keys(STUDY_FACTS).filter(k=>k!==${JSON.stringify(key)}).map(k=>[k,true])); L.ents=[{type:${JSON.stringify(type)},x:P.x,y:P.y,alive:true}]; setState('play'); update();`);
-    assert.equal(run('G.state'),'study'); assert.equal(run('G.studyKey'),key);
-  }
-  for (const key of run('Object.keys(STUDY_FACTS)')) run(`G.studyKey=${JSON.stringify(key)}; draw();`);
+  assert.equal(topics.size,run('Object.keys(STUDY_FACTS).length'));
 });
 check('study records, ghosts and best scores never overwrite normal records', () => {
   reset(); run('L.time=1200; L.recording=[[6,68,804,1],[1200,2700,548,1]]; finishLevel();');

@@ -129,9 +129,9 @@ function drawAbilityHUD() {
     text(ahead > 0 ? ahead + ' tiles clear' : 'Sources fire faster', 866, 94, { size: 12, color: '#e6f3fa', align: 'center' });
   }
   text('R retry stock · G ghost ' + (G.ghostOn ? 'on' : 'off'), VIEW_W - 18, VIEW_H - 14, { size: 12, color: '#f5fcff', align: 'right', weight: '700' });
-  if (L.difficulty !== 100) {
+  if (L.difficulty !== 100 && G.toastT <= 0) {
     roundRect(210, 58, 250, 30, 10, 'rgba(10,31,43,0.92)', '#a7e0d4', 1);
-    text(L.difficulty < 100 ? 'STUDY · B biology notes' : 'HARD · faster pace', 222, 78, { size: 12, color: '#c3ffdf', weight: '800' });
+    text(L.difficulty < 100 ? 'STUDY · B read nearby station' : 'HARD · faster pace', 222, 78, { size: 12, color: '#c3ffdf', weight: '800' });
   }
 }
 
@@ -168,65 +168,58 @@ function syncDifficultyControl() {
   if (help) help.textContent = G.difficulty < 100 ? 'Explore, learn biology, keep your replicates.'
     : G.difficulty > 100 ? 'Faster pace. Shorter protection after hits.' : 'The original challenge.';
 }
-function openStudyNote(key, returnState = 'play') {
-  G.studyKey = key; G.studyReturn = returnState;
+// Stations are fixed places to read, never automatic encounter popups.
+function syncStudyStation() {
+  let nearest = null, distance = 72;
+  if (G.state === 'play' && L.difficulty < 100) {
+    for (const station of L.studyStations) {
+      const d = dist(P.x + P.w / 2, P.y + P.h / 2, station.tx * TILE + 16, station.ty * TILE + 16);
+      if (d < distance) { nearest = station; distance = d; }
+    }
+  }
+  if (nearest !== G.studyStation) {
+    G.studyStation = nearest; G.studyOpen = false; G.studyIndex = 0;
+    renderStudyStation();
+  }
+}
+function toggleStudyStation() {
+  syncStudyStation();
+  if (!G.studyStation) return;
+  G.studyOpen = !G.studyOpen;
+  renderStudyStation();
+}
+function turnStudyPage(direction) {
+  if (!G.studyOpen || !G.studyStation) return;
+  G.studyIndex = (G.studyIndex + direction + G.studyStation.topics.length) % G.studyStation.topics.length;
+  renderStudyStation();
+}
+function renderStudyStation() {
+  if (!studyControls || !studyPanel) return;
+  const nearby = G.state === 'play' && !!G.studyStation;
+  studyControls.hidden = !nearby;
+  studyPanel.hidden = !nearby || !G.studyOpen;
+  document.getElementById('study-open').textContent = G.studyOpen ? 'Close biology note · B' : 'Open biology note · B';
+  if (studyPanel.hidden) return;
+  const topics = G.studyStation.topics, key = topics[G.studyIndex], note = STUDY_FACTS[key];
   G.studySeen[key] = true;
-  for (const k in keys) keys[k] = false;
-  setState('study');
+  document.getElementById('study-title').textContent = note.title;
+  document.getElementById('study-biology').textContent = note.biology;
+  document.getElementById('study-game').textContent = note.game;
+  document.getElementById('study-source').textContent = note.source;
+  document.getElementById('study-count').textContent = (G.studyIndex + 1) + ' / ' + topics.length;
+  document.getElementById('study-prev').hidden = topics.length < 2;
+  document.getElementById('study-next').hidden = topics.length < 2;
+  studyPanel.scrollTop = 0;
 }
-function reviewStudyNotes(returnState) {
-  const notes = Object.keys(G.studySeen);
-  if (!notes.length) notes.push('strain');
-  G.studyReview = notes; G.studyIndex = 0;
-  openStudyNote(notes[0], returnState);
-}
-function showNearbyStudy() {
-  const show = key => {
-    if (!key || G.studySeen[key]) return false;
-    G.studyReview = null;
-    openStudyNote(key);
-    return true;
-  };
-  if (show(L.def.name) || show('strain')) return true;
-  const px = P.x + P.w / 2, py = P.y + P.h / 2;
-  for (const e of L.ents) {
-    if (!e.alive) continue;
-    const x = e.cx ?? e.bx ?? e.x + 16, y = e.cy ?? (e.by ? e.by + e.jy - 35 : e.y + 16);
-    if (dist(px, py, x, y) < 150 && show(STUDY_ENTITY_NOTES[e.type])) return true;
-  }
-  const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
-  for (let y = ty - 3; y <= ty + 2; y++) for (let x = tx - 3; x <= tx + 3; x++) {
-    const tile = tileAt(x, y);
-    const note = tile === 'R' ? 'ribosome' : tile === '^' ? 'foam'
-      : ['~', '<', '>'].includes(tile) ? 'airway' : null;
-    if (show(note)) return true;
-  }
-  return false;
-}
-function drawStudyNote() {
-  const note = STUDY_FACTS[G.studyKey];
-  ctx.fillStyle = 'rgba(8,20,28,0.72)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  roundRect(100, 60, 760, 424, 18, '#fbf8f1', '#75b6a1', 2);
-  text('STUDY NOTES · WORLD PAUSED', 132, 90, { size: 13, color: '#276a67', weight: '900' });
-  text(note.title, 132, 124, { size: 25, color: '#183b45', weight: '800' });
-  let y = 159;
-  text('THE BIOLOGY', 132, y, { size: 12, color: '#276a67', weight: '900' });
-  y += 25;
-  for (const line of wrap(note.biology, 690, 17)) {
-    text(line, 132, y, { size: 17, color: '#22343b', weight: '500' }); y += 23;
-  }
-  y += 13;
-  text('IN THIS GAME', 132, y, { size: 12, color: '#93620a', weight: '900' }); y += 24;
-  for (const line of wrap(note.game, 690, 16)) {
-    text(line, 132, y, { size: 16, color: '#514b3d', weight: '500' }); y += 22;
-  }
-  text(note.source, 132, 408, { size: 12, color: '#596b6d', weight: '500' });
-  text('References and links in README · B reopens discovered notes', 132, 426, { size: 12, color: '#596b6d', weight: '500' });
-  roundRect(310, 438, 340, 32, 10, '#276a67');
-  text('Enter / Space / tap to ' + (G.studyReview ? 'return' : 'continue'), VIEW_W / 2, 460, { size: 16, color: '#fff', align: 'center', weight: '800' });
-  if (G.studyReview) {
-    text(`←  ${G.studyIndex + 1} / ${G.studyReview.length}  →`, 806, 90, { size: 13, color: '#276a67', align: 'right', weight: '800' });
-    text('◀ Previous', 132, 460, { size: 14, color: '#276a67', weight: '800' });
-    text('Next ▶', 828, 460, { size: 14, color: '#276a67', align: 'right', weight: '800' });
+function drawStudyStations() {
+  for (const station of L.studyStations) {
+    const x = station.tx * TILE + 16, y = station.ty * TILE + 16;
+    if (x < L.cam - 60 || x > L.cam + VIEW_W + 60 || y < L.camY - 60 || y > L.camY + VIEW_H + 60) continue;
+    const near = station === G.studyStation;
+    roundRect(x - 15, y - 12, 30, 28, 7, '#276a67', near ? '#f5ca65' : '#b5e9d7', near ? 3 : 1.5);
+    roundRect(x - 10, y - 7, 9, 16, 2, '#fbf8f1');
+    roundRect(x + 1, y - 7, 9, 16, 2, '#fbf8f1');
+    roundRect(x - 35, y - 33, 70, 16, 6, 'rgba(10,31,43,0.9)');
+    text('BIOLOGY', x, y - 21, { size: 10, color: near ? '#f5ca65' : '#c3ffdf', align: 'center', weight: '800' });
   }
 }

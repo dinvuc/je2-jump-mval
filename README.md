@@ -77,13 +77,16 @@ penalty. **Hard** runs at 115% pace and halves protection after hits, from 1.5 t
 routes and strain abilities stay the same in all modes. The real experiment's
 pulse was still 15 minutes; difficulty only changes the game.
 
-In Study, new encounters open biology notes with the world and clock paused.
+In Study, four marked **biology stations** per level offer optional reading.
+Approach a station, then click **Open biology note** or press **B** to read.
+Cards never open automatically. The note appears to one side; the world keeps
+running and movement controls still work. Roll away and the note closes
+automatically. You can also close it with B or the × button.
 The 21 topics cover exposure histories, phosphorylation, nutrient uptake,
 translation, proteomics, secreted products, oxidative defenses, airway biology
-and replication. Each card separates biology from the game's metaphor. Press
-Enter/Space or tap to continue; press B during play or choose **Review biology
-notes** when paused to revisit discovered notes. Use left/right or the on-screen
-Previous/Next controls to browse, then Enter or the center button to return.
+and replication. Each card separates biology from the game's metaphor. Use the
+station's Previous/Next buttons to browse its topics. Stations remain available
+when you return; reading never triggers a sequence of encounter popups.
 Times, ghosts and best scores are stored separately for each difficulty, so
 Study and Hard runs cannot replace Normal records. Tab to a difficulty button
 and use Enter/Space to select it, or click/tap it, then choose a strain to start.
@@ -253,7 +256,7 @@ moving surfaces and crumbling platforms unavailable, and checks entry and return
 routes for the peptide detours. This proves a permanent main terrain route;
 it does not certify hazard balance, reaction time or visual layout
 in a browser. tests/harness.cjs supplies a mock Canvas environment.
-Difficulty checks also cover the three buttons, Hard pacing, paused note transitions, easier timing and
+Difficulty checks also cover the three buttons, Hard pacing, optional stations, easier timing and
 damage rules, unchanged terrain, and separation of Normal/study records.
 
 ## License

@@ -209,9 +209,3 @@ const STUDY_FACTS = {
     source: 'Course experimental design · README',
   },
 };
-const STUDY_ENTITY_NOTES = {
-  cystine: 'sulfur', tcya: 'sulfur', peptide: 'peptide', psm: 'psm',
-  xan: 'xan', ahpc: 'ahpc', dripper: 'ros', rosgun: 'ros', rosb: 'ros', drop: 'ros', glob: 'ros',
-  hcn: 'hcn', hqno: 'hqno', lasa: 'proteases', lasb: 'proteases', omv: 'omv',
-  iron: 'iron', sidero: 'iron', pa: 'airway', twitch: 'airway', boss: 'boss', check: 'replicates',
-};

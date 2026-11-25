@@ -1,6 +1,34 @@
 'use strict';
 // Tile coordinates: row zero is the top; a surface at row r supports a cell at r-1.
 // Main-route steps rise at most two rows. All routes are permanently open.
+// Optional reading stations on broad, permanent floors. These are added only
+// in Study mode, independently of enemies and collectibles.
+const STUDY_STATIONS = [
+  [
+    { tx: 6, ty: 25, topics: ['TSB', 'strain', 'sulfur'] },
+    { tx: 12, ty: 25, topics: ['ribosome', 'psm', 'peptide'] },
+    { tx: 53, ty: 17, topics: ['sulfur', 'iron'] },
+    { tx: 69, ty: 25, topics: ['replicates'] },
+  ],
+  [
+    { tx: 18, ty: 53, topics: ['SNpulse', 'omv', 'hcn'] },
+    { tx: 24, ty: 41, topics: ['ahpc', 'xan', 'proteases'] },
+    { tx: 18, ty: 29, topics: ['ros', 'ribosome'] },
+    { tx: 30, ty: 13, topics: ['peptide', 'replicates'] },
+  ],
+  [
+    { tx: 5, ty: 7, topics: ['SN', 'iron'] },
+    { tx: 9, ty: 26, topics: ['proteases', 'hqno', 'omv'] },
+    { tx: 28, ty: 47, topics: ['foam', 'xan'] },
+    { tx: 44, ty: 47, topics: ['replicates', 'peptide'] },
+  ],
+  [
+    { tx: 6, ty: 67, topics: ['CF airway', 'airway'] },
+    { tx: 26, ty: 45, topics: ['psm', 'xan', 'ahpc'] },
+    { tx: 22, ty: 33, topics: ['airway', 'replicates'] },
+    { tx: 37, ty: 11, topics: ['boss', 'ros'] },
+  ],
+];
 function newLevel(cols, rows) {
   return { cols, rows, grid: Array.from({ length: rows }, () => Array(cols).fill(' ')),
     bg: Array.from({ length: rows }, () => Array(cols).fill(' ')), ents: [], signs: [], ribo: {}, route: [] };

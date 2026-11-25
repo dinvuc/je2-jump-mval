@@ -24,6 +24,18 @@
         </div>
         <p id="difficulty-help" aria-live="polite">The original challenge.</p>
       </section>
+      <div id="study-controls" hidden>
+        <button id="study-open" type="button">Open biology note · B</button>
+      </div>
+      <aside id="study-panel" aria-label="Biology station" hidden>
+        <div class="study-heading"><span>BIOLOGY STATION</span><button id="study-close" type="button" aria-label="Close biology note">×</button></div>
+        <h2 id="study-title"></h2>
+        <h3>The biology</h3><p id="study-biology"></p>
+        <h3>In this game</h3><p id="study-game"></p>
+        <p id="study-source" class="study-source"></p>
+        <div class="study-navigation"><button id="study-prev" type="button">◀ Previous</button><span id="study-count"></span><button id="study-next" type="button">Next ▶</button></div>
+        <p class="study-hint">Keep rolling to close · references in README</p>
+      </aside>
       <div id="touch" hidden>
         <button data-key="pause" class="pause" aria-label="pause or resume">Ⅱ</button>
         <button data-key="left" aria-label="left">◀</button>

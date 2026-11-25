@@ -29,7 +29,10 @@ function makeCanvas() {
 }
 const mainCanvas = makeCanvas();
 const touch = { hidden: true, querySelectorAll: () => [], querySelector: () => null };
-const controls = Object.fromEntries(['run-settings', 'mode-study', 'mode-normal', 'mode-hard', 'difficulty-help'].map(id => [id, {
+const controls = Object.fromEntries(['run-settings', 'mode-study', 'mode-normal', 'mode-hard', 'difficulty-help',
+  'study-controls', 'study-panel', 'study-open', 'study-close', 'study-prev', 'study-next',
+  'study-title', 'study-biology', 'study-game', 'study-source', 'study-count'].map(id => [id, {
+  id,
   dataset: { difficulty: id === 'mode-study' ? '0' : id === 'mode-hard' ? '150' : '100' },
   hidden: false, value: '100', textContent: '', handlers: {}, attributes: {},
   addEventListener(name, fn) { this.handlers[name] = fn; },
@@ -50,6 +53,6 @@ for (const file of ['facts', 'levels', 'runtime', 'game']) {
   new vm.Script(fs.readFileSync(filename, 'utf8'), { filename }).runInContext(sandbox);
 }
 
-const reset = (level = 0, strain = 'anc', difficulty = 100) => run("for (const key in keys) keys[key] = false; G.studySeen = {}; G.studyReview = null; G.difficulty = " + difficulty + "; G.strain = '" + strain + "'; G.levelIdx = " + level + "; loadLevel(" + level + "); setState('play');");
+const reset = (level = 0, strain = 'anc', difficulty = 100) => run("for (const key in keys) keys[key] = false; G.studySeen = {}; G.difficulty = " + difficulty + "; G.strain = '" + strain + "'; G.levelIdx = " + level + "; loadLevel(" + level + "); setState('play');");
 module.exports = { run, reset, storage, events, mainCanvas, sandbox, controls,
   setDisplayWidth(value) { displayWidth = value; events.resize(); } };
