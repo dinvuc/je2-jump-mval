@@ -1,7 +1,7 @@
 'use strict';
 // game.js -- "JE2 Jump": a small platformer about the Bio253 JE2 proteomics course.
 // Plain JavaScript + <canvas>, no libraries, no build step: open index.html and play.
-// Needs facts.js (STRAINS, LEVEL_FACTS, strainFact) and levels.js (LEVELS).
+// Needs facts.js, levels.js and runtime.js; classic scripts, no build step.
 
 const TILE = 32, VIEW_W = 960, VIEW_H = 544;
 const STEP_MS = 1000 / 60;            // fixed physics step: 60 updates per second
@@ -14,7 +14,6 @@ const JUMP_V = -10.6;
 const COYOTE = 12;  // frames you may still jump after walking off a ledge (0.2 s)
 const BUFFER = 6;   // frames a jump press is remembered before landing
 const LYSIS_DELAY = 36, LYSIS_DOWN = 240;   // lysed cells: collapse after 0.6 s, back after 4 s
-const PHOS_TIME = 600;                      // phospho-switch stays ON for 10 s
 const PULSE_S = 900;                        // the SNpulse clock shows 15 min
 const SPRING_V = -15.5;                     // swollen-cell bounce (~6 rows)
 const MAX_AMMO = 20;                        // PSM shots you can carry
@@ -24,6 +23,12 @@ const ENEMIES = new Set(['lasa', 'omv', 'lasb', 'pa', 'twitch', 'sidero', 'rosb'
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
+configureCanvas();
+function resizeGame() {
+  if (configureCanvas() && L) L.art = buildLevelArt(L, L.def.theme, G.levelIdx);
+}
+addEventListener('resize', resizeGame);
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resizeGame).observe(canvas);
 
 // ---- input -----------------------------------------------------------------------
 const keys = {};      // held right now
@@ -34,6 +39,7 @@ const KEYMAP = {
   Space: ['jump', 'confirm'], Enter: ['ok', 'confirm'],
   KeyP: ['pause'], Escape: ['pause'], Digit1: ['s1'], Digit2: ['s2'], Digit3: ['s3'],
   KeyM: ['mute'], KeyN: ['music'], KeyX: ['shoot'], KeyK: ['shoot'], ShiftLeft: ['shoot'], ShiftRight: ['shoot'],
+  KeyC: ['dash'], KeyR: ['retry'], KeyG: ['ghost'],
 };
 function press(k) { if (!keys[k]) pressed[k] = true; keys[k] = true; }
 function release(k) { keys[k] = false; }
@@ -103,7 +109,7 @@ const AUDIO = (() => {
     check: () => arp([784, 1175], 0.08, 'sine', 0.06),
     pop: () => fx(900, 300, 0.08, 'sine', 0.04),
     crack: () => { fx(170, 55, 0.14, 'sawtooth', 0.035); hiss(0.12, 0.05, ac.currentTime, 1500, sfxBus); },
-    signal: () => arp([392, 523, 659, 784, 1047], 0.05, 'sine', 0.05, 0.18),
+    dash: () => fx(160, 740, 0.16, 'triangle', 0.05),
     off: () => arp([660, 440], 0.08, 'sine', 0.04),
     done: k => arp([                                       // a different victory jingle per level
       [523, 659, 784, 1047, 1319],                         // TSB: bright C major
@@ -118,7 +124,6 @@ const AUDIO = (() => {
     move: () => fx(440, 440, 0.03, 'square', 0.02),
     shoot: () => fx(900, 500, 0.08, 'square', 0.03),
     boing: () => fx(180, 720, 0.22, 'sine', 0.08),
-    warp: () => { fx(700, 120, 0.3, 'triangle', 0.05); fx(1200, 300, 0.25, 'sine', 0.03, 0.05); },
     ribo: () => arp([392, 523, 784], 0.05, 'square', 0.04, 0.1),
     breakb: () => { hiss(0.15, 0.08, ac.currentTime, 800, sfxBus); fx(140, 60, 0.12, 'square', 0.04); },
     peptide: () => arp([659, 880, 1175, 1568], 0.06, 'sine', 0.06, 0.18),
@@ -214,11 +219,26 @@ const AUDIO = (() => {
 
 // Touch buttons (only shown on touch screens).
 const touchBox = document.getElementById('touch');
-if (matchMedia('(pointer: coarse)').matches) touchBox.hidden = false;
 for (const b of touchBox.querySelectorAll('button')) {
   const k = b.dataset.key;
   b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); AUDIO.unlock(); press(k); });
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, () => release(k));
+}
+
+const fullScreenButton = document.getElementById('fullscreen');
+if (fullScreenButton) {
+  const stage = document.getElementById('stage');
+  if (!stage.requestFullscreen) fullScreenButton.hidden = true;
+  else fullScreenButton.addEventListener('click', async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await stage.requestFullscreen();
+    } catch { /* fullscreen can be unavailable in an embedded browser */ }
+  });
+  document.addEventListener('fullscreenchange', () => {
+    fullScreenButton.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+    resizeGame();
+  });
 }
 
 // Clicks / taps on the canvas: strain cards on the title, items in the pause menu,
@@ -235,6 +255,8 @@ canvas.addEventListener('pointerdown', e => {
   } else if (G.state === 'paused') {
     const i = menuRects().findIndex(m => x > m.x && x < m.x + m.w && y > m.y && y < m.y + m.h);
     if (i >= 0) { G.menuIdx = i; menuSelect(); }
+  } else if (G.state === 'gameOver' && y > 420 && y < 480) {
+    pressed.retry = true;
   } else if (G.state !== 'play') {
     pressed.ok = true;
   }
@@ -244,14 +266,20 @@ canvas.addEventListener('pointerdown', e => {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
-function loadBest() { try { return Number(localStorage.getItem('je2jump_best')) || 0; } catch { return 0; } }
-function saveBest(v) { try { localStorage.setItem('je2jump_best', String(v)); } catch { /* private mode */ } }
+function loadBest() { try { return Number(localStorage.getItem('je2jump_v3_best')) || 0; } catch { return 0; } }
+function saveBest(v) { try { localStorage.setItem('je2jump_v3_best', String(v)); } catch { /* private mode */ } }
 // Best times per level (seconds), kept in this browser only.
-function loadTimes() { try { return JSON.parse(localStorage.getItem('je2jump_times')) || {}; } catch { return {}; } }
-function saveTimes(t) { try { localStorage.setItem('je2jump_times', JSON.stringify(t)); } catch { /* private mode */ } }
+function loadTimes() {
+  try {
+    const value = JSON.parse(localStorage.getItem('je2jump_v3_times'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([, t]) => Number.isFinite(t) && t > 0));
+  } catch { return {}; }
+}
+function saveTimes(t) { try { localStorage.setItem('je2jump_v3_times', JSON.stringify(t)); } catch { /* private mode */ } }
 const MEDALS = [['gold', '#f3c22f'], ['silver', '#c9d3dc'], ['bronze', '#d08a4c']];
 function medalFor(def, secs) {
-  const i = def.medals.findIndex(m => secs <= m);
+  const i = medalTargets(def).findIndex(m => secs <= m);
   return i < 0 ? null : MEDALS[i];
 }
 const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -275,11 +303,13 @@ function mix(h1, h2, t) {
 
 // ---- game state ------------------------------------------------------------------
 const G = { state: 'title', strain: 'anc', levelIdx: 0, startLevel: 0, score: 0, results: [], toast: '', toastT: 0, best: loadBest(), seen: {}, shake: 0, menuIdx: 0 };
+G.ghostOn = true;
 let L = null;  // the running level
 let P = null;  // the player
 
 function setState(s) {
   G.state = s; clearPressed();
+  touchBox.hidden = !matchMedia('(pointer: coarse)').matches || (s !== 'play' && s !== 'paused');
   AUDIO.music(s === 'title' ? 'title' : !L ? 'title' : L.bossActive && !L.bossDown ? 'boss' : L.def.name);
   AUDIO.duck(s === 'paused');
   if (s !== 'play' && s !== 'paused') { AUDIO.muffle(false); AUDIO.intensity(0); }
@@ -297,11 +327,13 @@ function loadLevel(i) {
   const def = LEVELS[i];
   const b = def.build();
   L = {
-    def, cols: b.cols, rows: b.rows, grid: b.grid, signs: b.signs, ribo: b.ribo,
+    def, cols: b.cols, rows: b.rows, grid: b.grid, signs: b.signs, ribo: b.ribo, route: b.route,
     ents: b.ents.map(e => ({ ...e, x: e.tx * TILE, y: e.ty * TILE, alive: true, t: 0 })),
     time: 0, cam: 0, camY: 0, cystine: 0, ironBank: 0, ironTotal: 0, points: 0, goalMsgT: 0,
-    fx: [], pops: [], movers: [], blocks: [], shots: [], lysis: new Map(), chan: {}, solids: [], plats: [],
-    combo: 0, comboT: 0, kills: 0, peptides: 0, gateOpened: false, spawnQ: [],
+    fx: [], pops: [], movers: [], shots: [], lysis: new Map(), solids: [], plats: [],
+    combo: 0, comboT: 0, kills: 0, peptides: 0, spawnQ: [],
+    retries: 0,
+    recording: [], ghostIndex: 0,
     bossActive: false, bossDown: false, bg: b.bg, caveK: 0, jiggle: new Map(), goalSeen: {},
     abNext: 60 * (35 + Math.random() * 15), abWarn: 0, abOn: 0, abExpose: 0, covered: true,
     coughNext: 60 * (14 + Math.random() * 10), coughing: 0, coughWarn: 0, coughFlash: 0,
@@ -311,10 +343,6 @@ function loadLevel(i) {
   L.totalPep = L.ents.filter(e => e.type === 'peptide').length;
   L.totalStocks = L.ents.filter(e => e.type === 'check').length; L.stocks = 0;
   for (const e of L.ents) initEntity(e);
-  for (const e of L.ents) if (e.ch && (e.type === 'gate' || e.type === 'shuttle')) {
-    const src = L.ents.find(o => (o.type === 'agrc' || o.type === 'phos') && o.ch === e.ch);
-    e.src = src ? src.type : '';
-  }
   const start = L.ents.find(e => e.type === 'start');
   L.respawn = { x: start.x + 4, y: start.y + 4 };
   P = {
@@ -322,10 +350,15 @@ function loadLevel(i) {
     onGround: false, coyote: 0, buffer: 0, djReady: true, groundT: 0,
     face: 1, inv: 0, slow: 0, shield: 0, magnet: 0, phos: 0, reps: 3, squash: 0, ride: null, roll: 0,
     ammo: 0, gold: 0, shootCool: 0, sticky: 0, belt: 0, sprung: false,
+    glide: 60, dash: 0, dashCool: 0, shootFlash: 0,
   };
   G.toast = ''; G.toastT = 0; G.failReason = ''; G.shake = 0; G.iris = 45; G.hitStop = 0;
   for (const g of def.goals) L.goalSeen[g.id] = g.id === 'reps' || g.id === 'time';
-  L.solids = dynSolids();
+  L.solids = [];
+  L.ghost = loadGhost();
+  captureCheckpoint();
+  const dashButton = touchBox.querySelector('[data-key="dash"]');
+  if (dashButton) dashButton.hidden = G.strain !== 'stk';
   snapCamera();
 }
 
@@ -335,19 +368,10 @@ function initEntity(e) {
     case 'sidero': e.hx = e.x + 16; e.hy = e.y + 16; e.cx = e.hx; e.cy = e.hy; e.cool = 0; break;
     case 'hqno': e.cx = e.x + 16; e.cy = e.y + 16; break;   // drawn before its first update
     case 'vent': e.cool = 20; e.rise = e.rise || 10; break;
-    case 'gate': e.h = e.h || 4; e.open = 0; break;
-    case 'shuttle':
-      e.len = e.len || 3; e.x0 = e.x; e.y0 = e.y; e.x1 = e.to[0] * TILE; e.y1 = e.to[1] * TILE;
-      e.px = e.x; e.py = e.y; e.dir = 1; e.dx = 0; e.dy = 0; e.wait = 0;
-      e.top = e.py; e.pl = e.px; e.pr = e.px + e.len * TILE;
-      break;
-    case 'agrb': e.cool = 0; e.block = { x: e.x + TILE, y: e.y, w: TILE, h: TILE, vy: 0, home: e, docked: false, block: true }; L.blocks.push(e.block); break;
-    case 'agrc': e.on = false; break;
-    case 'phos': e.timer = 0; break;
     case 'omv': e.vx = 1.5; e.vy = 0; break;
     case 'lasb': case 'pa': e.hx = e.x + 16; e.hy = e.y + 16; e.cx = e.hx; e.cy = e.hy; e.ang = 0; break;
     case 'twitch': e.dir = -1; break;
-    case 'channel': case 'spring': e.cool = 0; e.sq = 0; break;
+    case 'spring': e.cool = 0; e.sq = 0; break;
     case 'rosgun': e.cool = 60 + (e.tx * 37) % 120; break;
     case 'boss': Object.assign(e, { bx: e.x + 16, by: (e.ty + 1) * TILE, hp: 20, maxHp: 20, state: 'idle', timer: 0, dir: 1, open: 0, vy: 0, jy: 0, hitT: 0, cycle: 0 }); break;
   }
@@ -392,34 +416,13 @@ function tileAt(tx, ty) {
 }
 const oneWay = c => c === '=' || c === '%';
 
-// Dynamic solids: closed gates and AIP blocks.
-function dynSolids() {
-  const out = [];
-  for (const e of L.ents) if (e.type === 'gate') {
-    const h = e.h * TILE * (1 - e.open);
-    if (h > 2) out.push({ x: e.x + 4, y: e.y, w: TILE - 8, h, gate: e });
-  }
-  return out.concat(L.blocks);
-}
-
 function moveX() {
   P.x += P.vx;
   const top = Math.floor(P.y / TILE), bot = Math.floor((P.y + P.h - 1) / TILE);
-  if (P.vx > 0) {
-    const tx = Math.floor((P.x + P.w - 1) / TILE);
-    for (let ty = top; ty <= bot; ty++) if (isSolid(tileAt(tx, ty))) { P.x = tx * TILE - P.w; P.vx = 0; break; }
-  } else if (P.vx < 0) {
-    const tx = Math.floor(P.x / TILE);
-    for (let ty = top; ty <= bot; ty++) if (isSolid(tileAt(tx, ty))) { P.x = (tx + 1) * TILE; P.vx = 0; break; }
-  }
-  for (const r of L.solids) {
-    if (!overlap(P, r) || P.y + P.h <= r.y + 6) continue;   // standing on top is moveY's job
-    if (r.block && !r.docked && P.vx !== 0) {
-      pushBlock(r, P.vx > 0 ? P.x + P.w - r.x : P.x - (r.x + r.w));
-      P.vx = clamp(P.vx, -1.9, 1.9);                         // pushing is slower
-    }
-    if (!overlap(P, r)) continue;
-    if (P.x + P.w / 2 < r.x + r.w / 2) P.x = r.x - P.w; else P.x = r.x + r.w;
+  const tx = Math.floor((P.vx > 0 ? P.x + P.w - 1 : P.x) / TILE);
+  if (P.dash > 0) for (let ty = top; ty <= bot; ty++) if (tileAt(tx, ty) === 'B') breakTile(tx, ty);
+  for (let ty = top; ty <= bot; ty++) if (isSolid(tileAt(tx, ty))) {
+    P.x = P.vx > 0 ? tx * TILE - P.w : (tx + 1) * TILE; P.vx = 0; break;
   }
 }
 
@@ -452,7 +455,7 @@ function moveY() {
     if (hit < 0) for (let tx = left; tx <= right; tx++) if (isSolid(tileAt(tx, ty))) { hit = tx; break; }
     if (hit >= 0) { P.y = (ty + 1) * TILE; P.vy = 0; bumpTile(hit, ty); }
   }
-  // Moving platforms (air bubbles, bridges): one-way, they carry you. They can
+  // Air bubbles are one-way moving surfaces that carry you. They can
   // also lift you off the floor when they rise through your feet.
   if (P.vy >= 0) for (const m of L.plats) {
     if (P.x + P.w > m.pl + 2 && P.x < m.pr - 2 && prevBottom <= m.top + 2 + (m === rode ? 2 : 0) && P.y + P.h >= m.top - 0.01) {
@@ -684,8 +687,9 @@ function updateCough() {
     L.coughing--;
     const k = Math.sin((1 - L.coughing / 100) * Math.PI);
     G.shake = Math.max(G.shake, 4 + 10 * k);
-    if (!P.onGround) P.vy -= 0.28 * k;       // the air rushes up the airway
-    P.vx += (Math.random() - 0.5) * 1.3 * k;
+    // Crouch to brace on a floor; hold jump in the air to ride the updraft.
+    if (P.onGround && keys.down) P.vx *= 0.8;
+    else if (!P.onGround) P.vy -= (keys.jump ? 0.5 : 0.2) * k;
     return;
   }
   if (L.coughWarn > 0) L.coughWarn--;
@@ -701,17 +705,20 @@ function updateCough() {
       const y = clamp(P.y - 40 - Math.random() * 160, TILE, (L.rows - 2) * TILE);
       if (!isSolid(tileAt(Math.floor(x / TILE), Math.floor(y / TILE)))) { spawnEnemy('pa', x, y); made++; }
     }
-    toast('Cough! The airway shakes and stirs up more P. aeruginosa.', 160);
+    toast('Updraft! Hold jump to ride the air; hold ↓ on a floor to brace.', 160);
   }
 }
 
 // ---- level goals -------------------------------------------------------------------
 function goalStatus(g) {
   switch (g.id) {
-    case 'gate': return { done: L.gateOpened, text: g.label };
+    case 'sample': {
+      const goal = L.ents.find(e => e.type === 'goal');
+      return { done: !!goal && overlap(P, { x: goal.x, y: goal.y - TILE, w: TILE * 2, h: TILE * 2 }), text: g.label };
+    }
     case 'cys': return { done: L.cystine >= g.n, text: `${g.label} (${Math.min(L.cystine, g.n)}/${g.n})` };
     case 'pep': return { done: L.peptides >= L.totalPep, text: `${g.label} (${L.peptides}/${L.totalPep})` };
-    case 'reps': return { done: P.reps === 3, text: g.label };
+    case 'reps': return { done: P.reps === 3 && L.retries === 0, text: g.label };
     case 'kills': return { done: L.kills >= g.n, text: `${g.label} (${Math.min(L.kills, g.n)}/${g.n})` };
     case 'boss': return { done: L.bossDown, text: g.label };
     default: return { done: true, text: g.label };   // 'time': the pulse clock checks it
@@ -743,89 +750,6 @@ function updateLysis() {
     }
   }
   if (cracked) { AUDIO.play('crack'); G.shake = Math.max(G.shake, 3); }
-}
-
-// ---- puzzles: AIP blocks, AgrC receptors, gates, phospho-switches, moving bridges ----
-function pushBlock(b, d) {
-  if (!d) return;
-  b.x += d;
-  const top = Math.floor(b.y / TILE), bot = Math.floor((b.y + b.h - 1) / TILE);
-  const tx = Math.floor((d > 0 ? b.x + b.w - 1 : b.x) / TILE);
-  for (let ty = top; ty <= bot; ty++) if (isSolid(tileAt(tx, ty))) { b.x = d > 0 ? tx * TILE - b.w : (tx + 1) * TILE; break; }
-  for (const r of L.solids) if (r !== b && overlap(b, r)) b.x = d > 0 ? r.x - b.w : r.x + r.w;
-}
-function resetBlock(b) {
-  for (const e of L.ents) if (e.type === 'agrc' && e.block === b) { e.on = false; e.block = null; }
-  b.x = b.home.x + TILE; b.y = b.home.y; b.vy = 0; b.docked = false;
-}
-function updateBlocks() {
-  for (const b of L.blocks) {
-    if (b.docked) continue;
-    const col = Math.floor((b.x + b.w / 2) / TILE);
-    const below = tileAt(col, Math.round((b.y + b.h) / TILE));
-    const resting = b.vy === 0 && Math.abs((b.y + b.h) % TILE) < 0.01 && (isSolid(below) || oneWay(below));
-    if (resting) continue;
-    if (b.vy === 0) b.x = col * TILE;   // tips into the column under its centre (e.g. a receptor notch)
-    b.vy = Math.min(b.vy + GRAV, MAX_FALL);
-    const prevB = b.y + b.h;
-    b.y += b.vy;
-    for (let R = Math.ceil(prevB / TILE - 1e-6); R * TILE <= b.y + b.h; R++) {
-      const c = tileAt(col, R);
-      if (isSolid(c) || oneWay(c)) {
-        b.y = R * TILE - b.h; b.vy = 0;
-        const rec = L.ents.find(e => e.type === 'agrc' && e.tx === col && e.ty === R - 1);
-        if (rec && !rec.on) {
-          b.docked = true; rec.on = true; rec.block = b; L.gateOpened = true;
-          burst(b.x + 16, b.y + 16, '#7be08f', 18, 3);
-          once('agrc', 'AIP bound to its receptor AgrC: the signal is ON!');
-        }
-        break;
-      }
-    }
-    if (b.y > L.rows * TILE + 64) resetBlock(b);
-  }
-}
-function signalOn(ch) {
-  AUDIO.play('signal');
-  const src = L.ents.find(o => (o.type === 'agrc' || o.type === 'phos') && o.ch === ch);
-  for (const t of L.ents) if (t.ch === ch && t.type === 'shuttle') t.wait = Math.max(t.wait, 50);   // time to step on
-  for (const t of L.ents) if (t.ch === ch && (t.type === 'gate' || t.type === 'shuttle') && src) {
-    const sx = src.x + 16, sy = src.y + 16, tx = t.x + 16, ty = t.y + 16;
-    for (let i = 0; i < 16; i++) {
-      const f = 40 + i * 2;
-      L.fx.push({ x: sx, y: sy, vx: (tx - sx) / f, vy: (ty - sy) / f, grav: 0, life: f, max: f, color: '#b98ae6', r: 2.5 });
-    }
-  }
-}
-function updatePuzzles() {
-  const chan = {};
-  for (const e of L.ents) {
-    if (e.type === 'agrc' && e.on) chan[e.ch] = true;
-    if (e.type === 'phos' && e.timer > 0) {
-      chan[e.ch] = true;
-      if (--e.timer === 0) { AUDIO.play('off'); toast('A phosphatase removed the phosphate: switch OFF.', 120); }
-    }
-  }
-  for (const ch in chan) if (!L.chan[ch]) signalOn(ch);
-  L.chan = chan;
-  for (const e of L.ents) {
-    if (e.type === 'gate') {
-      if (chan[e.ch]) e.open = Math.min(1, e.open + 0.035);
-      else if (e.open > 0 && !overlap(P, { x: e.x, y: e.y, w: TILE, h: e.h * TILE })) e.open = Math.max(0, e.open - 0.05);
-    } else if (e.type === 'shuttle') {
-      const on = !e.ch || chan[e.ch];
-      const tx = on && e.dir > 0 ? e.x1 : e.x0, ty = on && e.dir > 0 ? e.y1 : e.y0;
-      e.dx = 0; e.dy = 0;
-      if (e.wait > 0) e.wait--;
-      else {
-        const d = dist(tx, ty, e.px, e.py), sp = 1.4;
-        if (d <= sp) { e.dx = tx - e.px; e.dy = ty - e.py; if (on && d > 0) { e.dir = -e.dir; e.wait = 40; } }
-        else { e.dx = (tx - e.px) / d * sp; e.dy = (ty - e.py) / d * sp; }
-      }
-      e.px += e.dx; e.py += e.dy;
-      e.top = e.py; e.pl = e.px; e.pr = e.px + e.len * TILE;
-    }
-  }
 }
 
 // Air bubbles rise from vents and carry you up.
@@ -896,7 +820,8 @@ function hurt(kind, msg) {
     toast('AhpC absorbed the ROS. Shield used up.');
     return;
   }
-  P.inv = 90; P.vy = -6; P.vx = -P.face * 3; P.dizzy = 80;
+  P.inv = 90; P.vy = -6; P.vx = -P.face * 3; P.dizzy = 80; P.damageT = 75;
+  P.damageLabel = ({ ros: 'ROS HIT', hcn: 'HCN HIT', foam: 'MEMBRANE HIT', enemy: 'CELL WALL HIT' })[kind] || 'REPLICATE LOST';
   burst(P.x + P.w / 2, P.y + P.h / 2, '#e0465a', 12, 3);
   G.shake = 10; AUDIO.play('hurt');
   loseReplicate(msg);
@@ -910,6 +835,10 @@ function respawn() {
 function updatePlay() {
   const S = STRAINS[G.strain];
   L.time++;
+  if (took('retry')) { retryCheckpoint(); return; }
+  if (P.dashCool > 0) P.dashCool--;
+  if (P.shootFlash > 0) P.shootFlash--;
+  if (took('dash')) startDash();
 
   if (L.def.timeLimit && L.time / 60 > L.def.timeLimit) {
     toast('The 15-min pulse ended before your sample reached the MS.');
@@ -919,14 +848,12 @@ function updatePlay() {
     return;
   }
 
-  updatePuzzles();
   updateMovers();
-  updateBlocks();
   updateLysis();
   updateCough();
   updateAntibiotic();
-  L.solids = dynSolids();
-  L.plats = L.movers.concat(L.ents.filter(e => e.type === 'shuttle'));
+  L.solids = [];
+  L.plats = L.movers;
   // Ride along with the platform you stand on.
   if (P.ride) {
     if (P.ride.alive === false) P.ride = null;
@@ -942,12 +869,13 @@ function updatePlay() {
   const dir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
   if (dir) { P.vx += dir * RUN_ACC; P.face = dir; } else P.vx *= FRICTION;
   P.vx = clamp(P.vx, -RUN_MAX * slowF, RUN_MAX * slowF);
+  if (P.dash > 0) { P.vx = P.face * 9 * slowF; P.dash--; }
   if (Math.abs(P.vx) < 0.05) P.vx = 0;
 
   // Jump, with coyote time and a small input buffer so it feels fair.
   if (took('jump')) P.buffer = BUFFER; else if (P.buffer > 0) P.buffer--;
   if (P.onGround) {
-    P.coyote = COYOTE; P.groundT++;
+    P.coyote = COYOTE; P.groundT++; P.glide = 60;
     if (S.doubleJump > 0 && P.groundT >= S.recharge) P.djReady = true;
   } else { P.coyote--; P.groundT = 0; }
 
@@ -962,22 +890,23 @@ function updatePlay() {
       burst(P.x + P.w / 2, P.y + P.h, '#b98ae6', 8, 2, 0.05, 22);
       AUDIO.play('dj');
     } else if (S.doubleJump === 0 && !P.onGround) {
-      once('nodj', 'stk: no Stk1 kinase, so no double jump. Time your jumps!');
+      once('nodj', 'stk trades its double jump for a ground dash. Press C on a floor to dash through debris.');
     }
   }
   if (!keys.jump && !P.sprung && P.vy < -3.5) P.vy = -3.5;   // let go early = lower jump (not after a bounce)
   P.vy = Math.min(P.vy + GRAV, MAX_FALL);
+  if (G.strain === 'stp' && keys.jump && P.vy > 0 && P.glide > 0) { P.vy = Math.min(P.vy, 2.4); P.glide--; }
   if (P.vy >= 0) P.sprung = false;
 
   // Shoot PSMs.
   if (P.shootCool > 0) P.shootCool--;
   if (took('shoot')) {
-    if (P.ammo > 0 && P.shootCool === 0) shoot();
+    if (P.ammo > 0 && P.shootCool === 0) { shoot(); P.shootFlash = 10; }
     else if (P.ammo === 0) once('noammo', 'No PSMs left. Jump into a ribosome block from below to make more.');
   }
 
   // Cilia beat and carry you along.
-  if (P.belt && P.onGround) { const v = P.vx; P.vx = P.belt; moveX(); P.vx = v; }
+  if (P.belt && P.onGround && !(L.coughing > 0 && keys.down)) { const v = P.vx; P.vx = P.belt; moveX(); P.vx = v; }
 
   const wasGround = P.onGround, fallV = P.vy;
   moveX();
@@ -1007,7 +936,7 @@ function updatePlay() {
     else if (c === '>') P.belt = 1.5;
   }
 
-  for (const t of ['inv', 'slow', 'shield', 'magnet', 'phos', 'gold', 'repFlash', 'dizzy']) if (P[t] > 0) P[t]--;
+  for (const t of ['inv', 'slow', 'shield', 'magnet', 'phos', 'gold', 'repFlash', 'dizzy', 'damageT']) if (P[t] > 0) P[t]--;
 
   if (inFoam()) hurt('foam', 'Rhamnolipid foam damaged your membrane.');
   if (G.state !== 'play') return;
@@ -1019,11 +948,12 @@ function updatePlay() {
     respawn();
   }
 
+  recordRun();
   updateEntities();
   updateShots();
   updateFx();
   followCamera();
-  pressed.down = false; pressed.up = false;   // ↓ only counts while standing on a channel
+  pressed.down = false; pressed.up = false;
   // tunnels: darker around a light on your cell, muffled music
   const inCave = L.bg && (L.bg[Math.floor((P.y + P.h / 2) / TILE)] || [])[Math.floor((P.x + P.w / 2) / TILE)] === 'c';
   L.caveK += ((inCave ? 1 : 0) - L.caveK) * 0.08;
@@ -1049,11 +979,13 @@ function updatePlay() {
 
 function updateEntities() {
   const pcx = P.x + P.w / 2, pcy = P.y + P.h / 2;
+  const front = L.def.name === 'SNpulse' ? exposureFrontY() : Infinity;
   const spawned = [];
   for (const e of L.ents) {
     if (G.state !== 'play') break;   // level ended (finished or n = 0) during this loop
     if (!e.alive) continue;
     e.t++;
+    e.exposed = e.y > front;
     if (e.pop > 0) { e.y -= 2; e.pop -= 2; }     // a protein coming out of a ribosome block...
     else if (e.fromRibo) {                         // ...then it slides off and drops to the floor
       const nx = e.x + e.vx, fy = Math.floor((e.y + 16) / TILE);
@@ -1098,21 +1030,6 @@ function updateEntities() {
           once('spring', 'Boing! A swollen cell throws you up.');
         }
         break;
-      case 'channel': { // a water channel through the biofilm: ↓ dives in, you come out at its partner
-        if (e.cool > 0) e.cool--;
-        e.near = P.onGround && Math.abs(pcx - cx) < 16 && Math.abs(P.y + P.h - (e.y + TILE)) < 3;
-        if (e.near && e.cool === 0 && took('down')) {
-          const to = L.ents.find(o => o.type === 'channel' && o.id === e.id && o !== e);
-          if (to) {
-            burst(pcx, pcy, '#9fd8ff', 14, 2.4, -0.03);
-            P.x = to.x + 4; P.y = to.y + 4; P.vx = 0; P.vy = 0; P.ride = null;
-            e.cool = to.cool = 30;
-            burst(P.x + P.w / 2, P.y + P.h / 2, '#9fd8ff', 14, 2.4, -0.03);
-            snapCamera(); AUDIO.play('warp');
-          }
-        }
-        break;
-      }
       case 'omv': { // outer membrane vesicle: bounces along
         e.vy = Math.min(e.vy + 0.35, 9);
         const nx = e.x + e.vx;
@@ -1140,7 +1057,7 @@ function updateEntities() {
         const dx = pcx - cx;
         e.face = dx >= 0 ? 1 : -1;
         if (e.cool === 0 && Math.abs(dx) > 40 && Math.abs(dx) < 620 && Math.abs(pcy - cy) < 150) {
-          e.cool = 170;
+          e.cool = e.exposed ? 115 : 170;
           spawnEnemy('rosb', cx + e.face * 20, cy - 4, { vx: e.face * 3.2 });
           burst(cx + e.face * 18, cy - 4, '#ffb36b', 8, 2, 0, 16);
           AUDIO.play('shoot');
@@ -1226,6 +1143,7 @@ function updateEntities() {
           burst(cx, cy, '#bfe6ff', 14, 2.4, -0.03);
           AUDIO.play('check');
           toast('Glycerol stock saved: you will restart here.', 140);
+          captureCheckpoint();
         }
         break;
       case 'goal': {
@@ -1240,27 +1158,9 @@ function updateEntities() {
         }
         break;
       }
-      case 'agrb': // touch AgrB to make a fresh AIP if yours got stuck
-        if (e.cool > 0) e.cool--;
-        if (e.cool === 0 && !e.block.docked && dist(cx, cy, pcx, pcy) < 26 &&
-            (Math.abs(e.block.x - (e.x + TILE)) > 4 || Math.abs(e.block.y - e.y) > 4)) {
-          burst(e.block.x + 16, e.block.y + 16, '#c9a7f0', 10, 2);
-          resetBlock(e.block);
-          burst(e.block.x + 16, e.block.y + 16, '#c9a7f0', 12, 2);
-          AUDIO.play('power'); e.cool = 60;
-          toast('AgrB made a fresh AIP.', 100);
-        }
-        break;
-      case 'phos':
-        if (dist(cx, cy, pcx, pcy) < 26 && e.timer < PHOS_TIME - 30) {
-          if (e.timer === 0) burst(cx, cy - 10, '#b98ae6', 14, 2.6);
-          e.timer = PHOS_TIME;
-          once('phos', 'Phosphorylated: switch ON for 10 s. Go!');
-        }
-        break;
       case 'dripper':
         // Wait until the player is near, then drop pyocyanin every ~1.6 s.
-        if (Math.abs(cx - pcx) < VIEW_W * 0.7 && Math.abs(cy - pcy) < VIEW_H && e.t % 80 === 0) {
+        if (Math.abs(cx - pcx) < VIEW_W * 0.7 && Math.abs(cy - pcy) < VIEW_H && e.t % (e.exposed ? 60 : 80) === 0) {
           spawned.push({ type: 'drop', x: e.x + 12, y: e.y + 26, vy: 0, alive: true, t: 0 });
         }
         break;
@@ -1346,8 +1246,8 @@ function finishLevel() {
   G.score += total;
   // medal time, and the best time for this level in this browser
   const secs = L.time / 60, medal = medalFor(L.def, secs), times = loadTimes();
-  const prevBest = times[L.def.name], newBest = prevBest === undefined || secs < prevBest;
-  if (newBest) { times[L.def.name] = secs; saveTimes(times); }
+  const prevBest = times[runKey()], newBest = prevBest === undefined || secs < prevBest;
+  if (newBest) { times[runKey()] = secs; saveTimes(times); saveGhost(); }
   G.times = times;
   G.results[G.levelIdx] = { name: L.def.name, points: L.points, timeBonus, repBonus, total, cystine: L.cystine, totalCys: L.totalCys, iron: L.ironTotal, reps: P.reps, secs, stars, starLabels, kills: L.kills, peptides: L.peptides, totalPep: L.totalPep, medal, best: Math.min(secs, prevBest ?? secs), newBest };
   setState('levelDone');
@@ -1356,17 +1256,18 @@ function finishLevel() {
 
 // ---- pause menu ------------------------------------------------------------------
 function menuItems() {
-  return ['Resume', 'Restart level', `Sound effects: ${AUDIO.sfxOn ? 'on' : 'off'}`, `Music: ${AUDIO.musicOn ? 'on' : 'off'}`, 'Main menu'];
+  return ['Resume', 'Retry checkpoint (+3 s)', 'Restart level', `Sound effects: ${AUDIO.sfxOn ? 'on' : 'off'}`, `Music: ${AUDIO.musicOn ? 'on' : 'off'}`, 'Main menu'];
 }
-function menuRects() { return menuItems().map((_, i) => ({ x: VIEW_W / 2 - 170, y: 176 + i * 52, w: 340, h: 44 })); }
+function menuRects() { return menuItems().map((_, i) => ({ x: VIEW_W / 2 - 170, y: 158 + i * 46, w: 340, h: 40 })); }
 function menuSelect() {
   AUDIO.play('click');
   switch (G.menuIdx) {
     case 0: setState('play'); break;
-    case 1: loadLevel(G.levelIdx); setState('intro'); break;
-    case 2: AUDIO.toggleSfx(); break;
-    case 3: AUDIO.toggleMusic(); break;
-    case 4: G.startLevel = G.levelIdx; setState('title'); break;
+    case 1: retryCheckpoint(); break;
+    case 2: loadLevel(G.levelIdx); setState('intro'); break;
+    case 3: AUDIO.toggleSfx(); break;
+    case 4: AUDIO.toggleMusic(); break;
+    case 5: G.startLevel = G.levelIdx; setState('title'); break;
   }
 }
 
@@ -1375,6 +1276,7 @@ function update() {
   if (G.iris > 0) G.iris--;
   if (took('mute')) AUDIO.toggleSfx();
   if (took('music')) AUDIO.toggleMusic();
+  if (took('ghost')) G.ghostOn = !G.ghostOn;
   switch (G.state) {
     case 'title': {
       const order = ['anc', 'stk', 'stp'];
@@ -1414,6 +1316,7 @@ function update() {
       }
       break;
     case 'gameOver':
+      if (took('retry')) { retryCheckpoint(); break; }
       if (took('pause')) { G.startLevel = G.levelIdx; setState('title'); break; }
       if (took('ok') || took('jump')) { G.failReason = ''; loadLevel(G.levelIdx); setState('intro'); }
       break;
@@ -1432,8 +1335,7 @@ function buildLevelArt(b, th, seed) {
   const at = (x, y) => b.grid[clamp(y, 0, b.rows - 1)][clamp(x, 0, b.cols - 1)];
   const S = (x, y) => y >= 0 && at(x, y) === '#';
 
-  const tiles = document.createElement('canvas');
-  tiles.width = W; tiles.height = H;
+  const tiles = terrainSurface(W, H);
   const g = tiles.getContext('2d');
 
   // 0) tunnels carved into the biofilm get a dark cave wall behind them
@@ -1507,6 +1409,8 @@ function buildLevelArt(b, th, seed) {
       }
       g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 1.5;
       g.beginPath(); g.moveTo(X + 2, Y + 0.5); g.lineTo(X + TILE - 2, Y + 0.5); g.stroke();
+      g.strokeStyle = rgba(th.matrix[1], 0.8); g.lineWidth = 1.5;
+      g.beginPath(); g.moveTo(X, Y + 7); g.lineTo(X + TILE, Y + 7); g.stroke();
       // small colonies budding on the surface
       if (rnd() < 0.2) {
         const ox = X + 6 + rnd() * 20, col = th.cells[Math.floor(rnd() * th.cells.length)];
@@ -1541,6 +1445,8 @@ function buildLevelArt(b, th, seed) {
       }
       g.fillStyle = th.plat[0];
       for (const ex of [X0, X1]) { g.beginPath(); g.arc(ex, cy, 4, 0, TAU); g.fill(); }
+      g.strokeStyle = rgba(th.eps, 0.95); g.lineWidth = 1.5;
+      g.beginPath(); g.moveTo(X0, y * TILE + 0.5); g.lineTo(X1, y * TILE + 0.5); g.stroke();
     }
   }
 
@@ -1679,10 +1585,20 @@ function drawCoccus(cx, cy, r, ring, o = {}) {
   ctx.save();
   ctx.translate(cx, cy + r * sq);
   ctx.scale(1 + sq, 1 - sq);
-  circle(0, 0, r + 4, rgba(ring, 0.22));
+  circle(0, 0, r + 3, 'rgba(255,255,244,0.85)');
+  circle(0, 0, r + 1.5, '#243442');
   ball(0, 0, r, '#fff5c4', o.slow ? '#c9c35a' : '#f3c22f', o.slow ? '#7d8a2a' : '#c0860c');
   ctx.strokeStyle = ring; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
   const s = r / 14;
+  // Fine internal structures make the cell feel translucent at high density.
+  ctx.save(); ctx.rotate((o.roll || 0) * 0.15);
+  ctx.strokeStyle = 'rgba(131,82,13,0.22)'; ctx.lineWidth = 1.2 * s;
+  ctx.beginPath();
+  for (let i = 0; i < 16; i++) {
+    const x = (i / 15 * 16 - 8) * s, y = (Math.sin(i * 1.2) * 3 + 5) * s;
+    if (!i) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke(); ctx.restore();
   // cell-wall dots that turn as the cell rolls
   for (let i = 0; i < 8; i++) {
     const a = (o.roll || 0) + i * TAU / 8;
@@ -1744,14 +1660,6 @@ function drawIronIcon(x, y, s = 1) {
   if (s >= 0.9) text('Fe', x, y + 4 * s, { size: 10 * s, color: '#fff', align: 'center', weight: '800' });
 }
 // AIP: a cyclic (thiolactone) peptide ring of 5 residues with a short tail.
-function drawAipIcon(x, y, s = 1) {
-  for (let i = 0; i < 3; i++) ball(x - 7 * s - i * 4.5 * s, y + 6 * s + i * 2.5 * s, 2.8 * s, '#f3e6ff', '#a274d6', '#5b2a8a');
-  for (let i = 0; i < 5; i++) {
-    const a = -Math.PI / 2 + i * TAU / 5;
-    ball(x + 2 * s + Math.cos(a) * 6.5 * s, y - 1 * s + Math.sin(a) * 6.5 * s, 3.3 * s, '#f6ecff', '#9b59d0', '#5b2a8a');
-  }
-}
-
 // ---- world drawing ---------------------------------------------------------------
 function drawBackground(th, cx, cy) {
   ctx.fillStyle = L.art.sky; ctx.fillRect(-12, -12, VIEW_W + 24, VIEW_H + 24);
@@ -2044,7 +1952,7 @@ function drawSignText(cx, cy) {
   const bx = clamp(x - w / 2, 8, VIEW_W - w - 8);
   let by = y - 28 - h;
   if (by < 58) by = y + 26;
-  roundRect(bx, by, w, h, 10, 'rgba(255,255,255,0.48)', 'rgba(90,120,150,0.45)', 1.5);
+  roundRect(bx, by, w, h, 10, 'rgba(248,255,253,0.96)', 'rgba(42,79,94,0.6)', 1.5);
   ctx.save(); ctx.shadowColor = 'rgba(255,255,255,0.9)'; ctx.shadowBlur = 3;   // keeps the text readable on the lighter box
   lines.forEach((ln, i) => text(ln, bx + 12, by + 23 + i * 18, { size: 14, color: '#13212b' }));
   ctx.restore();
@@ -2054,9 +1962,16 @@ function drawEntities(cx, cy) {
   for (const e of L.ents) {
     if (!e.alive || e.type === 'start') continue;
     const x = e.x, y = e.y;
-    if (e.type !== 'shuttle' && e.type !== 'gate' && e.type !== 'boss' && (x < cx - 140 || x > cx + VIEW_W + 140 || y < cy - 140 || y > cy + VIEW_H + 140)) continue;
+    if (e.type !== 'boss' && (x < cx - 140 || x > cx + VIEW_W + 140 || y < cy - 140 || y > cy + VIEW_H + 140)) continue;
     const bob = Math.sin((e.t + e.tx * 13) * 0.08) * 3;
     switch (e.type) {
+      case 'landmark': {
+        ctx.font = `800 14px ${FONT}`;
+        const w = ctx.measureText(e.label).width + 30;
+        roundRect(x + 16 - w / 2, y + 2, w, 29, 14, 'rgba(14,36,45,0.72)');
+        text(e.label, x + 16, y + 22, { size: 14, color: '#effff5', align: 'center', weight: '800' });
+        break;
+      }
       case 'cystine': { // two S atoms bonded: S–S, with an occasional twinkle
         glow(x + 16, y + 16 + bob, 20, '#ffd84a', 0.35);
         drawCystineIcon(x + 16, y + 16, 1, bob);
@@ -2202,70 +2117,6 @@ function drawEntities(cx, cy) {
         for (let k = 0; k < 3; k++) { const yy = y + 20 - ((e.t * 0.8 + k * 9) % 26); circle(x + 10 + k * 6 + Math.sin(e.t * 0.1 + k) * 1.5, yy, 1.8, 'rgba(255,255,255,0.75)'); }
         break;
       }
-      case 'agrb': { // AgrB in a patch of membrane: it makes the AIP
-        for (let i = 0; i < 6; i++) { circle(x + 2 + i * 5.6, y + 29, 2.3, '#c9b8e6'); circle(x + 2 + i * 5.6, y + 23, 2.3, '#c9b8e6'); }
-        ctx.strokeStyle = 'rgba(150,120,190,0.6)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y + 26); ctx.lineTo(x + 32, y + 26); ctx.stroke();
-        const g = ctx.createLinearGradient(x, y + 4, x + 24, y + 30);
-        g.addColorStop(0, '#b79ce0'); g.addColorStop(1, '#5b3a99');
-        roundRect(x + 6, y + 3, 20, 28, 9, g, '#3d2a63', 1.5);
-        text('AgrB', x + 16, y + 19, { size: 8, color: '#fff', align: 'center', weight: '800' });
-        if (!e.block.docked && (Math.abs(e.block.x - (e.x + TILE)) > 4 || Math.abs(e.block.y - e.y) > 4)) {
-          ctx.globalAlpha = 0.5 + 0.5 * Math.sin(e.t * 0.12);
-          text('↻', x + 16, y - 4, { size: 16, color: '#7a4fc9', align: 'center', weight: '900' });
-          ctx.globalAlpha = 1;
-        }
-        break;
-      }
-      case 'agrc': { // AgrC receptor: a pocket in the floor that binds the AIP
-        const on = e.on;
-        if (on) glow(x + 16, y + 16, 34, '#6fe08a', 0.5);
-        ctx.fillStyle = on ? 'rgba(80,200,120,0.3)' : 'rgba(30,10,50,0.35)'; ctx.fillRect(x + 2, y, 28, 32);
-        ctx.strokeStyle = on ? '#2e9b52' : '#8b5fd6'; ctx.lineWidth = 4; ctx.lineJoin = 'round';
-        ctx.beginPath(); ctx.moveTo(x + 3, y + 1); ctx.lineTo(x + 3, y + 26); ctx.quadraticCurveTo(x + 3, y + 30, x + 8, y + 30); ctx.lineTo(x + 24, y + 30); ctx.quadraticCurveTo(x + 29, y + 30, x + 29, y + 26); ctx.lineTo(x + 29, y + 1); ctx.stroke();
-        if (!on) {
-          text('AgrC', x + 16, y + 22, { size: 8, color: '#e6d8ff', align: 'center', weight: '800' });
-          ctx.globalAlpha = 0.45 + 0.45 * Math.sin(e.t * 0.1);
-          text('▼', x + 16, y - 6 + Math.sin(e.t * 0.1) * 3, { size: 13, color: '#8b5fd6', align: 'center', weight: '900' });
-          ctx.globalAlpha = 1;
-        }
-        break;
-      }
-      case 'phos': { // phospho-switch: a protein that carries a P while ON
-        const X = x + 16, Y = y + 16, on = e.timer > 0;
-        roundRect(x + 9, y + 26, 14, 6, 2, '#4d5a5f');
-        if (on) glow(X, Y, 28, '#b98ae6', 0.45);
-        ball(X, Y, 11, '#d8f5f1', on ? '#3aa39a' : '#7f9a97', on ? '#1d5f59' : '#455654');
-        if (on) {
-          ctx.strokeStyle = '#b98ae6'; ctx.lineWidth = 3;
-          ctx.beginPath(); ctx.arc(X, Y, 16, -Math.PI / 2, -Math.PI / 2 + TAU * e.timer / PHOS_TIME); ctx.stroke();
-          circle(X + 9, Y - 10, 7, '#7b3fb5');
-          text('P', X + 9, Y - 6, { size: 10, color: '#fff', align: 'center', weight: '900' });
-        } else {
-          ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = 'rgba(123,63,181,0.8)'; ctx.lineWidth = 1.5;
-          ctx.beginPath(); ctx.arc(X + 9, Y - 10, 6, 0, TAU); ctx.stroke(); ctx.restore();
-          ctx.globalAlpha = 0.5 + 0.5 * Math.sin(e.t * 0.12);
-          text('P', X + 9, Y - 6, { size: 10, color: '#7b3fb5', align: 'center', weight: '900' });
-          ctx.globalAlpha = 1;
-        }
-        break;
-      }
-      case 'gate': { // a closed barrier of protein subunits; slides up when its signal is ON
-        const H = e.h * TILE, vis = H * (1 - e.open), X = x + 4;
-        if (vis > 1) {
-          ctx.save(); ctx.beginPath(); ctx.rect(X - 2, y, 28, vis); ctx.clip();
-          const g = ctx.createLinearGradient(X, 0, X + 24, 0);
-          g.addColorStop(0, '#4a2d80'); g.addColorStop(0.5, '#9b74e0'); g.addColorStop(1, '#4a2d80');
-          roundRect(X, y + vis - H, 24, H, 8, g);
-          for (let k = 0; k < e.h * 2; k++) { ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.beginPath(); ctx.ellipse(X + 12, y + vis - H + 8 + k * 16, 8, 5, 0, 0, TAU); ctx.fill(); }
-          ctx.restore();
-          const by = y + vis - 16;
-          circle(X + 12, by, 9, '#ffffff');
-          if (e.src === 'phos') text('P', X + 12, by + 4, { size: 11, color: '#7b3fb5', align: 'center', weight: '900' });
-          else drawAipIcon(X + 12, by, 0.5);
-        }
-        roundRect(X - 4, y - 4, 32, 6, 3, '#3d2a63');
-        break;
-      }
       case 'peptide': { // a tryptic peptide (proteomics): a short chain ending in K or R
         const yy = y + 16 + bob;
         glow(x + 16, yy, 24, '#9fe7ff', 0.5);
@@ -2307,20 +2158,6 @@ function drawEntities(cx, cy) {
         ctx.strokeStyle = '#b07a10'; ctx.lineWidth = 2; ctx.stroke();
         ctx.strokeStyle = 'rgba(176,122,16,0.6)'; ctx.lineWidth = 1.2;
         for (const dx of [-6, 0, 6]) { ctx.beginPath(); ctx.moveTo(X + dx - 2, base - ry - 2); ctx.lineTo(X + dx + 2, base - ry - 2); ctx.stroke(); }
-        break;
-      }
-      case 'channel': { // a water channel opening in the floor
-        const X = x + 16, Y = y + TILE - 2;
-        glow(X, Y - 4, 26, '#6fc3ff', 0.35);
-        ctx.fillStyle = '#123247'; ctx.beginPath(); ctx.ellipse(X, Y, 14, 5, 0, 0, TAU); ctx.fill();
-        ctx.strokeStyle = '#8fd2ff'; ctx.lineWidth = 2.5; ctx.stroke();
-        for (let k = 0; k < 3; k++) { const yy = Y - ((e.t * 0.7 + k * 8) % 22); circle(X - 6 + k * 6, yy, 1.6, 'rgba(160,220,255,0.8)'); }
-        if (e.label) text(e.label, X, y + 4, { size: 10, color: '#1d4f73', align: 'center', weight: '800' });
-        if (e.near) {
-          ctx.globalAlpha = 0.6 + 0.4 * Math.sin(e.t * 0.2);
-          text('↓', X, y - 8 + Math.sin(e.t * 0.2) * 3, { size: 16, color: '#1d6fa3', align: 'center', weight: '900' });
-          ctx.globalAlpha = 1;
-        }
         break;
       }
       case 'omv': { // outer membrane vesicle: a double-membrane bubble with cargo
@@ -2432,24 +2269,7 @@ function drawEntities(cx, cy) {
         ctx.restore();
         break;
       }
-      case 'shuttle': { // moving bridge: a chain of protein beads that runs while its signal is ON
-        const on = !e.ch || L.chan[e.ch];
-        ctx.save(); ctx.setLineDash([4, 8]); ctx.strokeStyle = on ? 'rgba(58,163,154,0.45)' : 'rgba(80,90,95,0.3)'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(e.x0 + e.len * 16, e.y0 + 6); ctx.lineTo(e.x1 + e.len * 16, e.y1 + 6); ctx.stroke(); ctx.restore();
-        const X0 = e.px, X1 = e.px + e.len * TILE;
-        if (on) glow((X0 + X1) / 2, e.py + 6, 50, '#4cc3b6', 0.25);
-        roundRect(X0 + 1, e.py + 1, X1 - X0 - 2, 11, 5, on ? 'rgba(29,111,104,0.85)' : 'rgba(80,90,95,0.85)');
-        for (let px = X0 + 8; px < X1 - 4; px += 10) ball(px, e.py + 6, 4.5, '#e6fffb', on ? '#4cc3b6' : '#9aa6a9', on ? '#1d6f68' : '#5a6466');
-        if (on && e.wait === 0) text(e.dir > 0 ? '›' : '‹', (X0 + X1) / 2, e.py - 3, { size: 16, color: '#1d6f68', align: 'center', weight: '900' });
-        break;
-      }
     }
-  }
-  for (const b of L.blocks) { // AIP blocks
-    if (b.docked) glow(b.x + 16, b.y + 16, 30, '#6fe08a', 0.45);
-    roundRect(b.x + 1, b.y + 1, 30, 30, 7, b.docked ? 'rgba(205,245,215,0.95)' : 'rgba(238,228,252,0.95)', b.docked ? '#2e9b52' : '#7a4fc9', 2);
-    drawAipIcon(b.x + 15, b.y + 13, 0.95);
-    text('AIP', b.x + 16, b.y + 29, { size: 7, color: b.docked ? '#1e6b38' : '#5b2a8a', align: 'center', weight: '900' });
   }
   for (const s of L.shots) { // PSM shots: small pink helices with a trail
     for (let k = 1; k <= 3; k++) circle(s.x - s.vx * k * 0.8, s.y - s.vy * k * 0.8, 4 - k, `rgba(232,138,208,${0.5 - k * 0.12})`);
@@ -2532,7 +2352,20 @@ function drawPlayer() {
     glow(cx, cy, 34, '#ffd84a', 0.55 + 0.15 * Math.sin(L.time * 0.2));
     for (let k = 0; k < 4; k++) { const a = L.time * 0.08 + k * TAU / 4; circle(cx + Math.cos(a) * 22, cy + Math.sin(a) * 22, 2, '#fff3a0'); }
   }
-  drawCoccus(cx, cy, 14, S.colour, { face: P.face, slow: P.slow > 0, squash: P.squash, roll: P.roll, blink: L.time % 240 < 8 });
+  if (P.dash > 0) {
+    for (let i = 3; i > 0; i--) {
+      ctx.save(); ctx.globalAlpha = (4 - i) * 0.12;
+      drawCoccus(cx - P.face * i * 13, cy, 14, S.colour, { face: P.face, squash: 0.18 }); ctx.restore();
+    }
+  }
+  const stretch = !P.onGround && P.vy < -2 ? -Math.min(0.17, Math.abs(P.vy) * 0.015) : 0;
+  const breathe = P.onGround && Math.abs(P.vx) < 0.2 ? Math.sin(L.time * 0.065) * 0.025 : 0;
+  drawCoccus(cx, cy, 14, S.colour, { face: P.face, slow: P.slow > 0, squash: P.squash + stretch + breathe, roll: P.roll, blink: L.time % 240 < 8 || P.shootFlash > 6 });
+  if (P.phos > 12) {
+    const k = 1 - (P.phos - 12) / 18;
+    ctx.strokeStyle = `rgba(222,255,247,${1 - k})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(cx, cy + 8, 20 + k * 19, 7 + k * 8, 0, 0, TAU); ctx.stroke();
+  }
   if (P.shield > 0) {
     circle(cx, cy, 22, 'rgba(90,160,255,0.16)');
     ctx.strokeStyle = 'rgba(110,175,255,0.85)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 22, 0, TAU); ctx.stroke();
@@ -2636,7 +2469,7 @@ function drawHUD() {
     const lines = wrap(G.toast, 560, 16);
     const h = lines.length * 22 + 16;
     ctx.globalAlpha = Math.min(1, G.toastT / 30);
-    roundRect(VIEW_W / 2 - 300, 58, 600, h, 12, 'rgba(14,26,36,0.5)');
+    roundRect(VIEW_W / 2 - 285, 58, 570, h, 12, 'rgba(14,26,36,0.94)');
     roundRect(VIEW_W / 2 - 300, 58, 5, h, [12, 0, 0, 12], rgba(S.colour, 0.8));
     ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 4;
     lines.forEach((ln, i) => text(ln, VIEW_W / 2 + 3, 81 + i * 22, { size: 16, color: '#fff', align: 'center' }));
@@ -2669,9 +2502,9 @@ function drawGoalList() {
   const gs = L.def.goals.map(g => ({ g, s: goalStatus(g) }));
   ctx.font = `700 12px ${FONT}`;
   const w = Math.max(...gs.map(({ g, s }) => ctx.measureText(`☐ ${s.text}${g.req ? '' : '  ★'}`).width)) + 22;
-  const h = gs.length * 17 + 10, y0 = VIEW_H - h - 10;
-  roundRect(10, y0, w, h, 10, 'rgba(14,26,36,0.5)');
-  gs.forEach(({ g, s }, i) => text(`${s.done ? '☑' : '☐'} ${s.text}${g.req ? '' : '  ★'}`, 20, y0 + 19 + i * 17, { size: 12, color: s.done ? '#9be89f' : '#f4f1ea', weight: '700' }));
+  const h = gs.length * 20 + 12, y0 = VIEW_H - h - 34;
+  roundRect(10, y0, w + 24, h, 10, 'rgba(14,26,36,0.9)');
+  gs.forEach(({ g, s }, i) => text(`${s.done ? '☑' : '☐'} ${s.text}${g.req ? '' : '  ★'}`, 20, y0 + 21 + i * 20, { size: 13, color: s.done ? '#9be89f' : '#f4f1ea', weight: '700' }));
 }
 function goalLines(def) {
   return def.goals.map(g => `${g.req ? '•' : '★'} ${g.label}${g.req ? '' : ' (bonus star)'}`);
@@ -2741,8 +2574,8 @@ function drawTitle() {
   ctx.restore();
   drawCoccus(VIEW_W / 2 - 200, 70 + Math.sin(t * 3) * 6, 16, '#0072B2', { face: 1 });
   drawCoccus(VIEW_W / 2 + 200, 70 + Math.sin(t * 3 + 1.5) * 6, 16, '#009E73', { face: -1 });
-  text('A Staphylococcus aureus platformer from the Bio253 proteomics course', VIEW_W / 2, 132, { size: 18, color: '#3d3d3d', align: 'center' });
-  text('TSB → SNpulse → SN, plus a bonus CF airway. Solve, collect, keep your replicates.', VIEW_W / 2, 168, { size: 16, color: '#2b2b2b', align: 'center', weight: '500' });
+  text('SMALL CELL. BIG REACTION.', VIEW_W / 2, 132, { size: 20, color: '#174953', align: 'center', weight: '900' });
+  text('Run, bounce and glide. Find your own way to the sample.', VIEW_W / 2, 168, { size: 17, color: '#2b2b2b', align: 'center', weight: '600' });
   text('Choose your strain (1 / 2 / 3, ← →, or click a card to start):', VIEW_W / 2, 200, { size: 16, color: '#2b2b2b', align: 'center' });
   for (const c of strainCards()) {
     const S = STRAINS[c.key], sel = G.strain === c.key, lift = sel ? -6 : 0;
@@ -2763,13 +2596,13 @@ function drawTitle() {
     const d = LEVELS[c.i], sel = G.startLevel === c.i;
     roundRect(c.x, c.y, c.w, c.h, 18, sel ? d.theme.accent : 'rgba(255,255,255,0.6)', sel ? null : 'rgba(0,0,0,0.15)', 1.5);
     text(c.i < 3 ? `${c.i + 1}. ${d.name}` : `★ ${d.name} (bonus)`, c.x + c.w / 2, c.y + 24, { size: 14, color: sel ? '#fff' : '#2b2b2b', align: 'center', weight: '800' });
-    const best = bestTimes[d.name], m = best !== undefined && medalFor(d, best);   // best medal so far
+    const best = bestTimes[runKey(d)], m = best !== undefined && medalFor(d, best);   // this strain's best medal
     if (m) { circle(c.x + c.w - 14, c.y + 18, 7, m[1]); ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(c.x + c.w - 14, c.y + 18, 7, 0, TAU); ctx.stroke(); }
   }
   ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 4);
   text(`Press Enter / Space to start${G.best ? '   ·   best score ' + G.best : ''}`, VIEW_W / 2, 466, { size: 17, color: '#10202b', align: 'center', weight: '800' });
   ctx.globalAlpha = 1;
-  text(`M sound ${AUDIO.sfxOn ? 'on' : 'off'} · N music ${AUDIO.musicOn ? 'on' : 'off'} · P pause menu`, VIEW_W / 2, 494, { size: 13, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '600' });
+  text(`C stk dash · hold jump to glide as stp · R retry · G ghost · M sound ${AUDIO.sfxOn ? 'on' : 'off'} · N music ${AUDIO.musicOn ? 'on' : 'off'}`, VIEW_W / 2, 494, { size: 13, color: 'rgba(16,32,43,0.85)', align: 'center', weight: '600' });
   text('PASN = cell-free spent medium of P. aeruginosa PAO1 (no living Pseudomonas).', VIEW_W / 2, 520, { size: 13, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '500' });
 }
 
@@ -2782,13 +2615,15 @@ function drawWorld() {
   ctx.save();
   ctx.translate(sx, sy);
   drawBackground(th, cx, cy);
-  ctx.drawImage(L.art.tiles, cx, cy, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+  drawTerrain(L.art.tiles, cx, cy);
   ctx.translate(-cx, -cy);
   drawSpecialTiles(cx, cy);
   drawFoam(cx, cy);
   drawLysis(cx, cy);
   drawSigns(cx, cy);
   drawEntities(cx, cy);
+  drawDamageFeedback();
+  drawGhost();
   drawPlayer();
   drawFx();
   ctx.restore();
@@ -2797,9 +2632,11 @@ function drawWorld() {
   drawDarkness(cx, cy);
   drawCaveLight(cx, cy);
   drawVignette();
+  drawExposureFront(cx, cy);
   drawSignText(cx, cy);
   drawGoalList();
   drawHUD();
+  drawAbilityHUD();
 }
 
 // Microscope-style iris: the view opens from a small focused circle.
@@ -2823,7 +2660,7 @@ function draw() {
   const S = STRAINS[G.strain];
   switch (G.state) {
     case 'intro':
-      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), [`Medal times: gold ≤ ${fmtTime(L.def.medals[0])} · silver ≤ ${fmtTime(L.def.medals[1])} · bronze ≤ ${fmtTime(L.def.medals[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
+      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), [`Medal times: gold ≤ ${fmtTime(medalTargets(L.def)[0])} · silver ≤ ${fmtTime(medalTargets(L.def)[1])} · bronze ≤ ${fmtTime(medalTargets(L.def)[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
       break;
     case 'paused':
       drawPauseMenu();
@@ -2838,7 +2675,7 @@ function draw() {
       circle(mx, 279, 11, r.medal ? r.medal[1] : '#d9d4c7');
       if (r.medal) { ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(mx, 279, 11, 0, TAU); ctx.stroke(); }
       text(`${r.medal ? r.medal[0] + ' medal' : 'no medal'} · time ${fmtTime(r.secs)} · best ${fmtTime(r.best)}${r.newBest ? ' (new best!)' : ''}`, mx + 20, 284, { size: 15, color: '#3d3523', weight: '700' });
-      text(`gold ≤ ${fmtTime(L.def.medals[0])} · silver ≤ ${fmtTime(L.def.medals[1])} · bronze ≤ ${fmtTime(L.def.medals[2])}`, VIEW_W / 2, 304, { size: 12, color: '#8a8270', align: 'center', weight: '600' });
+      text(`gold ≤ ${fmtTime(medalTargets(L.def)[0])} · silver ≤ ${fmtTime(medalTargets(L.def)[1])} · bronze ≤ ${fmtTime(medalTargets(L.def)[2])}`, VIEW_W / 2, 304, { size: 12, color: '#8a8270', align: 'center', weight: '600' });
       break;
     }
     case 'gameOver':
@@ -2848,7 +2685,7 @@ function draw() {
         lines: G.failReason === 'pulse'
           ? ['In the real experiment the pulse samples were', 'harvested after exactly 15 min in PASN.', 'Try again, a bit faster.']
           : ['With zero replicates there is nothing to compare:', 'no mean, no variance, no test.', 'Even n = 3 is small, so protect your replicates!'],
-        footer: 'Enter: retry this level  ·  Esc: main menu', accent: '#b3261e',
+        footer: 'R / tap here: retry stock (+3 s) · Enter: restart · Esc: menu', accent: '#b3261e',
       });
       break;
     case 'win':

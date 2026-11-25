@@ -4,18 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>JE2 Jump</title>
-  <meta name="description" content="A small platformer about the Bio253 S. aureus JE2 proteomics course: play anc, stk or stp through TSB, SNpulse and SN.">
+  <meta name="description" content="Explore a living microscopic world in JE2 Jump: climb, bounce and glide through a biology-inspired platformer.">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main>
-    <h1>JE2 Jump</h1>
+    <header class="masthead">
+      <div><h1>JE2 <span>JUMP</span></h1><p class="tagline">Small cell. Big reaction.</p></div>
+      <button id="fullscreen" class="screen-button" type="button">Full screen</button>
+    </header>
     <div id="stage">
       <canvas id="game" width="960" height="544" aria-label="JE2 Jump game"></canvas>
       <div id="touch" hidden>
+        <button data-key="pause" class="pause" aria-label="pause or resume">Ⅱ</button>
         <button data-key="left" aria-label="left">◀</button>
         <button data-key="right" aria-label="right">▶</button>
-        <button data-key="down" class="down" aria-label="dive into channel">⤓</button>
+        <button data-key="down" class="down" aria-label="brace against cough">⤓</button>
+        <button data-key="dash" class="dash" aria-label="ground dash" hidden>Dash</button>
         <button data-key="shoot" class="shoot" aria-label="shoot">✦</button>
         <button data-key="jump" aria-label="jump">⤒</button>
       </div>
@@ -23,8 +28,10 @@
     <p class="help">
       <kbd>←</kbd><kbd>→</kbd> / <kbd>A</kbd><kbd>D</kbd> move ·
       <kbd>Space</kbd> / <kbd>↑</kbd> / <kbd>W</kbd> jump (press again in the air for a double jump) ·
-      <kbd>X</kbd> / <kbd>K</kbd> / <kbd>Shift</kbd> shoot · <kbd>↓</kbd> dive into a channel ·
-      <kbd>P</kbd> pause menu · <kbd>Enter</kbd> continue · <kbd>M</kbd> sound · <kbd>N</kbd> music
+      <kbd>C</kbd> stk dash · hold jump as stp to glide ·
+      <kbd>X</kbd> shoot · <kbd>↓</kbd> brace ·
+      <kbd>R</kbd> retry checkpoint · <kbd>G</kbd> personal ghost ·
+      <kbd>P</kbd> pause · <kbd>M</kbd> sound · <kbd>N</kbd> music
     </p>
     <p class="small">
       Inspired by the Bio253 block course <em>S. aureus</em> JE2 proteomics data (genotypes anc / stk / stp;
@@ -33,6 +40,7 @@
   </main>
   <script src="js/facts.js"></script>
   <script src="js/levels.js"></script>
+  <script src="js/runtime.js"></script>
   <script src="js/game.js"></script>
 </body>
 </html>

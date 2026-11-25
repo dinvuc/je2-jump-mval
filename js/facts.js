@@ -10,18 +10,21 @@
 const STRAINS = {
   anc: {
     key: 'anc', label: 'anc', title: 'wild type (JE2)', colour: '#0072B2',
-    doubleJump: 0.92, recharge: 1,
-    lines: ['Kinase Stk1 + phosphatase Stp1', 'both intact: full double jump,', 'recharges at once.'],
+    doubleJump: 0.92, recharge: 1, medalFactor: 1,
+    ability: 'AGILE · full double jump',
+    lines: ['AGILE · full double jump', 'Recharges on landing.', 'Explore the upper routes.'],
   },
   stk: {
     key: 'stk', label: 'stk', title: 'stk1::Tn (NE217)', colour: '#E69F00',
-    doubleJump: 0, recharge: 0,
-    lines: ['Transposon at codon 46 of 664:', 'no Stk1 kinase, so no double jump.', 'Hard mode.'],
+    doubleJump: 0, recharge: 0, medalFactor: 1.12,
+    ability: 'C · ground dash',
+    lines: ['GROUNDED · C to dash', 'Burst through debris.', 'Every main route is jumpable.'],
   },
   stp: {
     key: 'stp', label: 'stp', title: 'stp1::Tn (NE1919)', colour: '#009E73',
-    doubleJump: 0.6, recharge: 30,
-    lines: ['Transposon at codon 189 of 247.', 'No Stp1 AND much less Stk1 (polar', 'effect): weak, slow double jump.'],
+    doubleJump: 0.6, recharge: 30, medalFactor: 1.08,
+    ability: 'DRIFTER · hold jump to glide',
+    lines: ['DRIFTER · hold jump to glide', 'Weak jump, gentler descents.', 'No Stp1; much less Stk1 (polar)'],
   },
 };
 

@@ -1,11 +1,13 @@
 # JE2 Jump
 
+**Small cell. Big reaction.** Run, bounce and glide through a living microscopic world.
+
 A small browser platformer based on the Bio253 block course
 *Staphylococcus aureus* JE2 proteomics project (group mval: Din Vuckic &
-Mete Kabranlar).
+Mete Kabranlar). No install, build step, internet connection or libraries needed.
 
-**Play:** https://dinvuc.github.io/je2-jump-mval/. You can also open
-`index.html` in a browser; it needs no install, no build and no internet.
+**Play:** https://dinvuc.github.io/je2-jump-mval/. To play local changes, open
+index.html in your browser. Publishing the repository is a separate step.
 
 ## How it plays
 
@@ -13,118 +15,114 @@ You are a golden *S. aureus* JE2 cell. Pick one of the three course strains:
 
 | strain | in the course | in the game |
 |---|---|---|
-| `anc` | wild type JE2 | full double jump, recharges at once |
-| `stk` | `stk1::Tn` (NTML NE217, Tn at codon 46 of 664) | no double jump (no Stk1 kinase), hard mode |
-| `stp` | `stp1::Tn` (NTML NE1919, Tn at codon 189 of 247) | weak, slowly recharging double jump: no Stp1 **and** much less Stk1 (polar effect) |
+| anc | wild type JE2 | agile: full double jump, recharges on landing |
+| stk | stk1::Tn (NTML NE217, Tn at codon 46 of 664) | grounded: no double jump; C gives a short ground dash through debris |
+| stp | stp1::Tn (NTML NE1919, Tn at codon 189 of 247) | drifter: weak, slowly recharging double jump; hold jump to glide for up to 1 s while falling. No Stp1 **and** much less Stk1 (polar effect) |
 
-Then play the three media of the experiment as levels, plus a bonus level:
+All main routes use fixed platforms and the shared single jump. Strain abilities
+help with speed, exploration and recovery. Movement abilities are game metaphors,
+not measured phenotypes. There are no activation buttons, receptors, timed bridges,
+locked gates or teleport channels.
 
-1. **TSB** (60 × 46 tiles): control medium, tutorial. A room with a ribosome
-   block and a short tunnel (a shortcut), a strand tower, a middle ledge with
-   the quorum-sensing gate, and the MS on top. No PASN, so no PASN hazards.
-2. **SNpulse** (48 × 72): grown in TSB, then 15 min PASN. A climb against the
-   pulse clock: an OMV room, a ledge of HCN vents and superoxide rockets, a
-   strand shaft with LasB, a phospho-switch lift, a bubble ride, and lysed
-   strands to the MS at the top. One secret tunnel.
-3. **SN** (70 × 64): ~15 h in 70 % TSB + 30 % PASN. Down from a high start
-   onto a thick biofilm (over the top, or through its tunnel), into a pit over
-   rhamnolipid foam, and along the floor to the gate in front of the MS.
-4. **CF airway** (36 × 96, bonus): a cystic fibrosis airway. Floors alternate
-   left and right; you climb through sticky mucus, past beating cilia, mucus
-   plugs and superoxide, while the patient coughs now and then (the screen
-   shakes, air pushes you, and more *P. aeruginosa* appear). At the top waits
-   the boss, a **mucoid *P. aeruginosa* colony** in an alginate shell: it
-   spits pyocyanin, releases cells and slams the floor; shoot it, or jump on
-   it while its shell is open. Then reach the sputum sample.
-   **This level is a game setting, not part of the course experiment.**
+1. **TSB — the nutrient garden (88 × 30 tiles):** a horizontal tutorial with
+   low obstacles and a forgiving recovery floor. A swollen cell bounces you to
+   the canopy; permanent steps offer another route. Three peptides invite an
+   upper detour and a shaded passage with two exits. Finish on the sample terrace.
+   No PASN means no PASN hazards.
+2. **SNpulse — the exposure run (40 × 68):** grown in TSB, then 15 min PASN.
+   Four short climbing sections are separated by broad recovery ledges and
+   checkpoints. A bubble chimney has a permanent stair route beside it.
+   The blue exposure front accelerates pyocyanin sources and launchers behind
+   it. Reach the MS within 145 game seconds; the HUD maps this to the experiment's
+   15-minute pulse. The front adds no contact damage.
+3. **SN — weathered biofilm (54 × 54):** ~15 h in 70 % TSB + 30 % PASN.
+   Descend along broad shelves, choose the upper route or walk into the open
+   nutrient-rich lower passage, then cross foam on fixed stepping stones.
+   Nutrient collection is a bonus, so reaching the sample completes the level.
+4. **CF airway (40 × 76, bonus):** a shorter alternating climb mixes mucus,
+   cilia, spring-assisted jumps and an optional crumbling route. Jump takeoffs
+   on the main route are dry. Brace with down during a cough or hold jump to
+   ride the updraft. A checkpoint precedes the mucoid colony boss, with cover,
+   ammunition blocks and upper escape ledges. Defeat it and reach the sputum sample.
+   **This setting is not part of the course experiment.**
 
-Each level has at most one tunnel, with labelled channels ("tunnel",
-"back up", "secret"), and glowing arrows show the way at every turn. Inside a
-tunnel the view darkens around a soft light on your cell and the music is
-muffled.
-
-**Medal times:** every level has gold / silver / bronze target times (shown in
-the level intro). The HUD timer dot shows which medal you are still on track
-for; the results screen shows your medal and best time, and the title screen
-shows your best medal on each level button. Best times are kept in your
-browser only. (The targets are first estimates and may need tuning.)
-
-**Antibiotic waves (CF level):** every 55–80 s, after a 3 s warning, an inhaled
-antibiotic mist comes down the airway for 4 s. Take cover under a floor (within
-10 tiles above you) or lose a replicate. *P. aeruginosa* caught in the open
-die; the alginate-wrapped boss is unaffected.
-
-Each level has a goal checklist (bottom-left on screen). Required goals must be
-done before the MS (or the sputum sample) takes your sample; bonus goals give
-stars:
+Named landmarks, arrows and cystine trails mark the route. Missed jumps on the
+climbs generally land on the previous staging floor. Walk into tunnels normally;
+the view darkens and music is muffled inside them.
 
 | level | required | bonus stars |
 |---|---|---|
-| TSB | open the quorum-sensing gate | all 3 hidden peptides · keep 3/3 replicates |
-| SNpulse | reach the MS before the pulse ends | all 3 hidden peptides · neutralise 5 *P. aeruginosa* products |
-| SN | collect 6 cystine · open the gate | all 3 hidden peptides · keep 3/3 replicates |
-| CF airway | clear the mucoid colony · neutralise 6 *P. aeruginosa* cells | all 3 hidden peptides · keep 3/3 replicates |
+| TSB | reach the sample terrace | all 3 peptides · keep 3/3 replicates |
+| SNpulse | reach the MS before the exposure clock expires | all 3 peptides · neutralise 5 products |
+| SN | reach the MS | collect 8 cystine · all 3 peptides · keep 3/3 replicates |
+| CF airway | defeat the mucoid colony and reach the sample | neutralise 6 cells · all 3 peptides · keep 3/3 replicates |
 
-PASN is the cell-free, sterile-filtered spent medium of *P. aeruginosa* PAO1.
-It contains secreted molecules only. In the three PASN/TSB levels no living
-*Pseudomonas* appears, only secreted products. Living *P. aeruginosa* cells
-appear only in the separate CF bonus level.
+PASN is cell-free, sterile-filtered spent medium of *P. aeruginosa* PAO1.
+The three course levels contain only secreted products. Living *P. aeruginosa*
+appears only in the separate CF setting.
 
-### Things in the game
+**Medals and ghosts:** records are separate per level and strain. Initial gold,
+silver and bronze targets appear in the intro; stk gets 12 % more time and stp
+gets 8 % more. New layouts use version 3 records, preserving earlier records in
+browser storage. Your best run records a translucent personal ghost (G toggles it),
+with at most 12,000 positions, approximately 20 minutes. Everything stays in your
+browser; storage failure never prevents play. Medal targets still need player tuning.
+
+**Checkpoint retry (R):** restore the world, inventory and replicates saved at the
+last cryo-vial, or the starting position. Time continues and adds a 3 s penalty.
+Retried runs cannot earn the keep-all-replicates star. An expired SNpulse deadline
+starts a fresh attempt. On the game-over screen, tap the footer to retry the stock.
+
+**Antibiotic waves (CF):** a 3 s warning precedes a 4 s inhaled mist. Take cover
+under a floor within 10 tiles above you. Exposed *P. aeruginosa* die; the alginate
+boss is unaffected. Subsequent waves are 55–80 s apart.
+
+## Things in the world
 
 | thing | meaning |
 |---|---|
-| 3 culture flasks (lives) | your 3 replicates. A lost one is empty and flashes red. Lose them all and the game says "n = 0: no statistics possible" |
-| S–S (L-cystine) | collectible. TcyABC is the cystine transporter (TcyA = `B7H15_13375`) |
-| Fe | iron. Every 3 Fe restore a replicate |
-| tryptic peptide (chain ending in K) | hidden collectible, 3 per level. In proteomics, trypsin cuts proteins after K/R and the MS identifies the peptides |
-| ribosome block | jump into it from below: it "translates" a protein power-up that slides out |
-| PSMs (pink helices) | power-up: phenol-soluble modulins. Shoot them with `X`, `K` or `Shift` (12 per pickup) |
-| staphyloxanthin (golden chain) | power-up: for 12 s, ROS (pyocyanin drops) cannot hurt you, and you glow gold |
-| AhpC power-up | shield against one ROS hit (AhpC = `B7H15_02095`, alkyl hydroperoxide reductase) |
-| TcyA power-up | pulls cystine towards you |
-| blue drops from a phenazine | pyocyanin, which makes ROS and costs a replicate |
-| blue launcher + flying red O₂ | pyocyanin redox launcher firing superoxide radicals (O₂•⁻, a ROS) in straight lines. Jump over, stomp or shoot them; AhpC and staphyloxanthin protect you |
-| green cloud | HQNO, which inhibits respiration and makes you slow |
-| HCN vent | puffs hydrogen cyanide now and then; the cloud costs a replicate |
-| LasA (walks) / LasB (flies) | *P. aeruginosa* proteases. LasA charges when it sees you. Jump on them or shoot them |
-| bouncing double-membrane bubble | outer membrane vesicle (OMV) released by *P. aeruginosa*. Jump on it or shoot it |
-| glowing yellow-green claw | siderophore (e.g. pyoverdine). It steals iron; PSMs stop it |
-| pink foam | rhamnolipids, *P. aeruginosa* biosurfactants. Costs a replicate |
-| green rods (CF level only) | living *P. aeruginosa*: swimming (flagellum) and twitching (pili) cells |
-| green gel blob with eyes (CF boss) | a mucoid *P. aeruginosa* colony wrapped in alginate |
-| "COUGH!" (CF level) | every 24–46 s, with a warning: the screen shakes, air pushes you up, and up to 3 more *P. aeruginosa* appear |
-| yellow-green goo (CF) | thick mucus: slow and lower jumps |
-| pink floor with hairs (CF) | cilia that push you along |
-| debris / mucus plug blocks | shoot them, or bump them from below |
-| pale cracked cells | "lysed by LasA": they collapse 0.6 s after you land and come back after 4 s |
-| air stone + bubbles | stand on a bubble and ride it up |
-| swollen cell | land on it and it throws you about 6 tiles up |
-| water channel (blue opening) | stand on it and press `↓`: you come out at the other end |
-| AIP block, AgrC notch, AgrB | quorum-sensing puzzle: push the AIP into AgrC to open the purple gate. Touch AgrB for a fresh AIP |
-| phospho-switch + bead bridge / lift | touch the switch (a phosphate is added, ON) and the bridge or lift runs for 10 s, then a phosphatase switches it OFF |
-| cryo-vial | glycerol stock = checkpoint. You restart from the last one you touched. The HUD counts the stocks you have saved in the level |
-| glowing arrows | the way to go |
-| bubble with "i" | info vesicle: walk close to read it |
-| ground of packed cocci, strands, tunnels | decoration (biofilm look). Strands can be jumped through from below |
+| three culture flasks | lives represented as replicates; lose all and n = 0 |
+| S–S cystine | nutrient collectible; TcyABC is the cystine transporter (TcyA: B7H15_13375) |
+| Fe | every three restore a replicate |
+| peptide chain ending in K | optional collectible, three per level; trypsin cuts after K/R in proteomics |
+| ribosome block | bump from below to translate a protein power-up |
+| pink PSM helices | shooting ammunition, 12 per pickup; X/K/Shift fires |
+| golden staphyloxanthin | 12 s protection against ROS |
+| AhpC | one-hit ROS shield, up to 20 s (AhpC: B7H15_02095) |
+| TcyA | temporarily pulls cystine towards you |
+| pyocyanin drops / superoxide launcher | ROS hazards; dodge, shoot or use antioxidant protection |
+| HCN vent | warning puff followed by a damaging cloud |
+| HQNO cloud | temporarily slows movement and weakens jumps |
+| LasA / LasB / OMV | walking protease, flying protease, bouncing vesicle; stomp or shoot |
+| siderophore claw | competes for iron |
+| pink foam | rhamnolipid hazard |
+| mucus / cilia | sticky surfaces / directional conveyors |
+| low debris | jump over, shoot, bump from below, or dash through as stk |
+| pale cracked cells | collapse 0.6 s after landing and return after 4 s; optional routes only |
+| air stone / swollen cell | ride a bubble / bounce upwards |
+| cryo-vial | checkpoint; saved stocks are counted in the HUD |
+| green rods / alginate colony | living P. aeruginosa cells / boss in the CF setting only |
+| info vesicle | approach to read a short tip |
 
-The block-bumping, warp channels, bounce pads, pushable blocks, switches and
-moving platforms are standard puzzle-platformer mechanics; the art, names and
-levels are our own.
+Between levels, fact cards show real summary numbers from the course analysis.
+A_vs_B > 0 means higher in A; the text says which group is higher.
 
-Between levels the game shows real summary numbers from our analysis, for
-example the formal-test hit counts for `TSB_vs_SN` and `TSB_vs_SNpulse`. It
-always says in words which group is higher (`A_vs_B > 0` means higher in A).
+Controls: arrows or A/D to move; Space/up/W to jump (press again for a double
+jump as anc/stp); hold jump as stp to glide; C to dash as stk; X/K/Shift to shoot;
+down to brace against a cough; R to retry; G to toggle your ghost; P/Esc to pause;
+Enter to continue; M for effects and N for music. Touch screens get movement,
+jump, dash, shooting, brace and pause buttons. The page offers full screen.
 
-On the title screen, pick a strain (`1/2/3`, `←/→` or a click) and the level
-to start at (`↑/↓` or a click, including the CF bonus level), then press
-`Enter`/`Space` or click a strain card. Later levels follow in order.
+## Graphics
 
-Controls: `←/→` or `A/D` to move, `Space/↑/W` to jump (press again in the air
-to double jump), `X`/`K`/`Shift` to shoot, `↓` to dive into a channel, `P` or
-`Esc` for the pause menu (resume, restart level, sound, music, main menu),
-`Enter` to continue, `M` sound effects on/off, `N` music on/off. Touch screens
-get on-screen buttons.
+The main canvas adapts to its displayed size and screen pixel density, up to
+3 backing pixels per logical pixel. Physics and pointer input keep the same
+960 × 544 coordinate system. Terrain is also drawn into higher-density caches
+(up to 2×, capped at roughly 16 million pixels per level to bound memory).
+Resizing and full screen rebuild the terrain at the appropriate density.
+Soft distant layers remain intentionally subdued. Character outlines,
+platform edges, opaque text panels, jump stretch, idle breathing and dash
+afterimages improve readability. There are no downloaded graphics or fonts.
 
 ## Music and sound
 
@@ -158,8 +156,8 @@ music falls under the same MIT license as the code.
   "lysed cells" that collapse, ribosome blocks, shooting PSMs (in reality
   *S. aureus* toxins such as PSMs mainly act on host cells, not on
   *P. aeruginosa*), staphyloxanthin as a timed shield, the air bubbles, swollen
-  cells, water channels as warps, the glycerol stock checkpoints, "the AIP
-  signal opens a gate", "a phospho-switch runs a bridge for 10 s", mucus and
+  cells, the glycerol stock checkpoints, the `stk` dash, the `stp` glide,
+  the advancing exposure front, mucus and
   cilia as floor types, and which *P. aeruginosa* products appear where.
 - **Decoration only:** the level art (a biofilm-like ground of packed cocci,
   matrix strands, tunnels, drifting molecules, cell clusters in the background,
@@ -190,56 +188,34 @@ music falls under the same MIT license as the code.
 
 ## Files
 
-```
-index.html     page + canvas
-style.css      page style
-js/facts.js    strains, hit counts, fact cards (course content + CF background)
-js/levels.js   the four levels, built with small helper functions
-js/game.js     physics, entities, puzzles, drawing, audio, state machine
-```
+index.html and style.css provide the page and canvas. js/facts.js contains strain
+metaphors and sourced summary numbers. js/levels.js builds the layouts;
+js/runtime.js handles rendering density, dash, checkpoints, ghosts and the
+exposure-front display; js/game.js contains physics, entities, drawing and audio.
 
-### Make your own level
+## Level building and verification
 
-Levels are built in code, in tile coordinates (x = column, y = row, row 0 at
-the top). Something standing on a surface in row 30 sits in row 29:
+Levels use tile coordinates. A floor at row 30 supports an entity at row 29.
+Use ground/solid for terrain, plat for permanent one-way strands, lysed for optional
+crumbling detours, carve for walk-in passages, and put for entities. vent, spring,
+ribo, rosgun, sign, arrow and landmark add their named objects. L.route lists
+main-route terrain waypoints used by the regression search.
 
-```js
-const L = newLevel(60, 40);          // 60 columns, 40 rows
-ground(L, 0, 59, 30);                // floor from column 0 to 59, top surface row 30
-carve(L, 2, 50, 32, 34);             // a tunnel inside the floor
-solid(L, 30, 34, 20, 22);            // a floating block of biofilm
-plat(L, 17, 27, 4);                  // 4-tile strand in row 27
-lysed(L, 22, 26, 3);                 // lysed cells (collapse)
-mucus(L, 40, 45, 30); cilia(L, 46, 50, 30, 1);   // sticky floor, floor that pushes right
-ribo(L, 8, 26, 'psm');               // ribosome block that makes PSMs
-debris(L, 12, 12, 28, 29);           // breakable block
-put(L, 'cystine', 18, 26);           // collectibles: cystine, iron, peptide, xan, ahpc, tcya
-put(L, 'omv', 22, 29);               // enemies: lasa, lasb, omv, hcn, dripper, hqno, sidero, pa, twitch
-foam(L, 8, 9, 29);                   // rhamnolipid foam on the floor
-sign(L, 13, 29, 'Some text');        // info vesicle
-vent(L, 5, 29, 10);                  // air bubbles that rise 10 rows
-spring(L, 25, 29);                   // swollen cell
-channel(L, 3, 29, 1, 'tunnel'); channel(L, 4, 34, 1, 'back up');   // two labelled ends of channel 1
-rosgun(L, 40, 29);                   // pyocyanin launcher firing superoxide
-arrow(L, 30, 29, 'up');              // a glowing arrow: this way
-agrb(L, 24, 29);                     // AgrB; its AIP block appears at column 25
-agrc(L, 30, 30, 'a');                // AgrC notch in the floor, signal 'a'
-gate(L, 36, 25, 5, 'a');             // gate rows 25-29, opens on signal 'a'
-phos(L, 10, 29, 'b');                // phospho-switch, signal 'b' for 10 s
-shuttle(L, 12, 27, 3, 20, 27, 'b');  // 3-tile bridge from column 12 to 20 while 'b' is on
-```
+Keep main-route rises to two rows, use broad landing platforms and dry takeoffs,
+and leave a recovery floor below early jumps. A full single jump reaches about
+three rows. Mucus reduces that below two rows; place the next takeoff beyond it.
+Hide peptides on visible, reachable detours with a clear way back.
 
-Each level also lists its `goals` (see `LEVELS` in `js/levels.js`). A single
-jump climbs 3 rows (2 under HQNO or on mucus) and crosses about 4 columns, so
-the main path should never need more than that. A gate needs solid tiles
-above it that are out of reach, or players can jump over it.
-
-All four levels were checked with a physics-based search that replays real
-jumps (with springs, channels, lifts and bubbles). With the puzzles solved,
-every strain can reach the goal; with them unsolved, no strain can, so the
-puzzles cannot be skipped. Only peptides hidden behind breakable blocks need
-a PSM shot.
+Run node tests/game.test.cjs. The dependency-free checks cover every level and
+strain, removal of activation mechanics, sample and boss goals, dash collision,
+glide limits, checkpoint snapshots, timed retries, versioned records, ghosts,
+storage errors, scaling and pointer input. tests/routes.cjs searches the real
+collision functions through each main route using the basic single jump, with
+moving surfaces and crumbling platforms unavailable, and checks entry and return
+routes for the peptide detours. This proves a permanent main terrain route;
+it does not certify hazard balance, reaction time or visual layout
+in a browser. tests/harness.cjs supplies a mock Canvas environment.
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See LICENSE.
