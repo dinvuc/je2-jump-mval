@@ -1,6 +1,6 @@
 'use strict';
 // Rendering, movement abilities, checkpoints and personal ghosts.
-const RUN_VERSION = 3;
+const RUN_VERSION = 4;
 let renderScale = 1;
 
 // Keep physics in logical pixels; draw vectors at the display's actual density.

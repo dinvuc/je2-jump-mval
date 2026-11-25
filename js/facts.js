@@ -181,7 +181,7 @@ const STUDY_FACTS = {
   foam: {
     title: 'Rhamnolipids change interfaces',
     biology: 'Rhamnolipids are biosurfactants produced by P. aeruginosa. They affect interfaces and can permeabilize membranes, contributing to antimicrobial effects alongside other secreted products.',
-    game: 'Pink foam marks a membrane hazard. Fixed stepping stones and touch damage turn a concentration-dependent chemical effect into a platforming obstacle.',
+    game: 'Pink foam marks a membrane hazard. Foam pools, erupting geysers and drifting clumps turn a concentration-dependent chemical effect into platforming obstacles; their timing and placement are invented.',
     source: 'Gdaniec et al., 2020 · PMC7496599',
   },
   psm: {

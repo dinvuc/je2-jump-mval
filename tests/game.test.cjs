@@ -48,6 +48,41 @@ check('stk dash breaks low debris and cannot pass a solid wall', () => {
   assert(run('P.x + P.w <= 17*TILE'));
   reset(0,'anc'); run('P.onGround=true; startDash();'); assert.equal(run('P.dash'),0);
 });
+check('foam geysers hurt only while erupting and drifting foam follows its path', () => {
+  reset(2);
+  run("var gy=L.ents.find(e=>e.type==='geyser'); gy.phase=0; P.x=gy.x+4; P.y=gy.y+4; P.vx=0; P.inv=0;");
+  for (const [t, hurts] of [[40,false],[100,false],[150,true]]) {
+    run('P.inv=0; P.reps=3; gy.t=' + t + '; P.x=gy.x+4; P.y=gy.y+4; updateEntities();');
+    assert.equal(run('P.reps'), hurts ? 2 : 3, 'geyser at phase ' + t);
+  }
+  reset(2);
+  run("var d=L.ents.find(e=>e.type==='drift'); d.t=-1-d.phase; P.x=0; P.y=0; updateEntities(); var x0=d.cx, y0=d.cy; d.t=d.per/4-1-d.phase; updateEntities();");
+  assert(run('Math.abs(d.cy - y0 - d.dy*TILE) < 0.01 && Math.abs(d.cx - x0 - d.dx*TILE) < 0.01'));
+  run('P.inv=0; P.reps=3; P.x=d.cx-12; P.y=d.cy-14; d.t--; updateEntities();');
+  assert.equal(run('P.reps'),2);
+});
+check('conveyors carry a grounded cell, and only PASN or CF levels have foam', () => {
+  reset(0); run('P.x=50*TILE; P.y=26*TILE-P.h; P.vx=0; P.vy=0; P.onGround=true; for(let i=0;i<20;i++) update();');
+  assert(run('P.x < 50*TILE - 20'));
+  assert(!run("L.grid.some(r => r.includes('^')) || L.ents.some(e => e.type==='geyser' || e.type==='drift')"));
+  for (const level of [1,2,3]) {
+    reset(level);
+    assert(run("L.grid.some(r => r.includes('^'))")); assert(run("L.grid.some(r => r.includes('<') || r.includes('>'))"));
+    assert(run("L.ents.some(e => e.type==='drift')"));
+  }
+  for (const level of [1,2]) { reset(level); assert(run("L.ents.filter(e => e.type==='geyser').length >= 2")); }
+});
+check('defeated enemies are named in a stamped callout and a stacking HUD feed', () => {
+  reset(1);
+  run("var omvs=L.ents.filter(e=>e.type==='omv'); killEnemy(omvs[0]); killEnemy(omvs[1]);");
+  assert.equal(run('L.killFeed.length'),1); assert.equal(run('L.killFeed[0].n'),2);
+  assert.equal(run('L.killFeed[0].name'),'outer membrane vesicle');
+  assert.equal(run('L.callouts.length'),2); assert.equal(run('L.killCount.omv'),2); assert.equal(run('L.kills'),2);
+  run("killEnemy(L.ents.find(e=>e.type==='lasa'));");
+  assert.equal(run('L.killFeed[0].name'),'LasA protease'); assert.equal(run('L.killFeed.length'),2);
+  run('draw(); for(let i=0;i<40;i++) updateFx(); draw(); for(let i=0;i<300;i++) updateFx();');
+  assert.equal(run('L.killFeed.length'),0); assert.equal(run('L.callouts.length'),0);
+});
 check('stp glide is controlled by jump and expires without granting height', () => {
   reset(0,'stp'); run('P.x=50*TILE; P.y=100; P.vy=8; P.onGround=false; keys.jump=true; P.glide=2; update();');
   assert.equal(run('P.vy'),2.4); assert.equal(run('P.glide'),1);
@@ -81,9 +116,9 @@ check('cough controls give predictable air lift and bracing', () => {
 check('records and ghosts use the new layout version and stay strain-specific', () => {
   reset(); run('L.time=600; L.recording=[[6,68,804,1],[600,2700,548,1]]; finishLevel();');
   assert.equal(run('loadTimes()[runKey()]'),10); assert.equal(run('loadGhost().samples.length'),2);
-  assert.equal(run('RUN_VERSION'),3);
+  assert.equal(run('RUN_VERSION'),4);
   reset(0,'stk'); assert.equal(run('loadTimes()[runKey()]'),undefined); assert.equal(run('L.ghost'),null);
-  assert.equal(run('medalTargets(L.def)[0]'),62);
+  assert.equal(run('medalTargets(L.def)[0]'),73);
   reset(1,'stk'); assert(run('medalTargets(L.def).every(t => t <= L.def.timeLimit)'));
 });
 check('resizing and scaled pointer input preserve game and menu coordinates', () => {
@@ -116,7 +151,7 @@ check('hard runs faster, shortens hit protection and keeps separate records', ()
   reset(0,'anc',150); run('for(let i=0;i<60;i++) update();');
   assert.equal(run('G.state'),'play'); assert(run('L.time >= 68 && L.time <= 69'));
   run("hurt('ros','test');"); assert.equal(run('P.inv'),45); assert.equal(run('P.reps'),2);
-  assert.equal(run('runKey()'),'3:TSB:anc:hard'); assert.equal(run('bestScoreKey()'),'je2jump_v3_best_hard');
+  assert.equal(run('runKey()'),'4:TSB:anc:hard'); assert.equal(run('bestScoreKey()'),'je2jump_v3_best_hard');
   reset(1,'anc',150); assert.equal(run('L.timeLimit'),145);
   assert.equal(run('menuItems().length'),6); run('update(); draw();'); assert.equal(run('G.state'),'play');
 });
@@ -184,18 +219,18 @@ check('stations cover all topics on permanent floors without changing the layout
 });
 check('study records, ghosts and best scores never overwrite normal records', () => {
   reset(); run('L.time=1200; L.recording=[[6,68,804,1],[1200,2700,548,1]]; finishLevel();');
-  const normalTime=run('loadTimes()[runKey()]'), normalGhost=storage.get('je2jump_ghost_3:TSB:anc');
+  const normalTime=run('loadTimes()[runKey()]'), normalGhost=storage.get('je2jump_ghost_4:TSB:anc');
   storage.set('je2jump_v3_best','9000');
   reset(0,'anc',0); run('L.time=600; L.recording=[[6,68,804,1],[600,2700,548,1]]; finishLevel(); saveBest(100);');
   assert.equal(run('loadTimes()[runKey()]'),10);
   assert.equal(storage.get('je2jump_v3_best'),'9000');
-  assert.equal(storage.get('je2jump_ghost_3:TSB:anc'),normalGhost);
+  assert.equal(storage.get('je2jump_ghost_4:TSB:anc'),normalGhost);
   reset(); assert.equal(run('loadTimes()[runKey()]'),normalTime);
   assert.equal(run('loadGhost().samples[1][0]'),JSON.parse(normalGhost).samples[1][0]);
 });
 check('malformed storage and a full quota never prevent playing', () => {
   storage.set('je2jump_v3_times','"bad"'); assert.equal(run('Object.keys(loadTimes()).length'),0);
-  reset(); storage.set('je2jump_ghost_3:TSB:anc','{"v":3,"samples":[[null,0,0,1]]}');
+  reset(); storage.set('je2jump_ghost_4:TSB:anc','{"v":4,"samples":[[null,0,0,1]]}');
   assert.equal(run('loadGhost()'),null);
   run('localStorage.setItem=()=>{throw new Error("quota");}; L.time=600; finishLevel();');
   assert.equal(run('G.state'),'levelDone');

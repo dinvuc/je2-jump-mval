@@ -24,27 +24,36 @@ help with speed, exploration and recovery. Movement abilities are game metaphors
 not measured phenotypes. There are no activation buttons, receptors, timed bridges,
 locked gates or teleport channels.
 
-1. **TSB — the nutrient garden (88 × 30 tiles):** a horizontal tutorial with
-   low obstacles and a forgiving recovery floor. A swollen cell bounces you to
-   the canopy; permanent steps offer another route. Three peptides invite an
-   upper detour and a shaded passage with two exits. Finish on the sample terrace.
-   No PASN means no PASN hazards.
+1. **TSB — the nutrient garden (88 × 30 tiles):** a tutorial in three rooms.
+   Steps, a first gap and low debris lead to the canopy hill: bounce or climb
+   onto it and leap its shaft, or walk the tunnel below, where a flow channel
+   pushes against you. Floating pillars and a backward-pushing track over open
+   gaps lead up to the sample terrace. Peptides sit above the canopy, in the
+   tunnel and on a high strand. No PASN means no PASN hazards, so no foam.
 2. **SNpulse — the exposure run (40 × 68):** grown in TSB, then 15 min PASN.
-   Four short climbing sections are separated by broad recovery ledges and
-   checkpoints. A bubble chimney has a permanent stair route beside it.
+   Four climbs, each with its own hazard: a foam well with stepping stones and
+   a drifting foam clump; a flow channel and strand ladder with foam geysers;
+   foam strips and zigzag flow tracks; a bubble chimney (with strands beside it)
+   and a final foam-and-geyser gauntlet. Checkpoints sit between climbs.
    The blue exposure front accelerates pyocyanin sources and launchers behind
    it. Reach the MS within 145 game seconds; the HUD maps this to the experiment's
    15-minute pulse. The front adds no contact damage.
 3. **SN — weathered biofilm (54 × 54):** ~15 h in 70 % TSB + 30 % PASN.
-   Descend along broad shelves, choose the upper route or walk into the open
-   nutrient-rich lower passage, then cross foam on fixed stepping stones.
+   Descend over foam-capped steps past drifting foam, then take the roof with
+   its foam geysers or the fast flow channel underneath. The spillway mixes
+   flow tracks, a foam-edged ledge and drifting foam; the foam lake at the bottom
+   is crossed on a pillar, a track and a ledge between two geysers.
    Nutrient collection is a bonus, so reaching the sample completes the level.
-4. **CF airway (40 × 76, bonus):** a shorter alternating climb mixes mucus,
-   cilia, spring-assisted jumps and an optional crumbling route. Jump takeoffs
-   on the main route are dry. Brace with down during a cough or hold jump to
-   ride the updraft. A checkpoint precedes the mucoid colony boss, with cover,
-   ammunition blocks and upper escape ledges. Defeat it and reach the sputum sample.
+4. **CF airway (40 × 76, bonus):** a climb built from stacked cilia tracks
+   pushing in alternating directions, with mucus, foam patches, drifting foam,
+   a spring and optional crumbling shortcuts. Jump takeoffs on the main route
+   are dry. Brace with down during a cough or hold jump to ride the updraft.
+   A checkpoint precedes the mucoid colony boss, with cover, ammunition blocks
+   and upper escape ledges. Defeat it and reach the sputum sample.
    **This setting is not part of the course experiment.**
+
+Defeated enemies are named twice: a stamped callout appears where they were,
+and a feed below the HUD lists them, stacking repeats as ×2, ×3.
 
 Named landmarks, arrows and cystine trails mark the route. Missed jumps on the
 climbs generally land on the previous staging floor. Walk into tunnels normally;
@@ -63,7 +72,7 @@ appears only in the separate CF setting.
 
 **Medals and ghosts:** records are separate per level and strain. Initial gold,
 silver and bronze targets appear in the intro; stk gets 12 % more time and stp
-gets 8 % more. New layouts use version 3 records, preserving earlier records in
+gets 8 % more. New layouts use version 4 records, preserving earlier records in
 browser storage. Your best run records a translucent personal ghost (G toggles it),
 with at most 12,000 positions, approximately 20 minutes. Everything stays in your
 browser; storage failure never prevents play. Medal targets still need player tuning.
@@ -118,8 +127,9 @@ boss is unaffected. Subsequent waves are 55–80 s apart.
 | HQNO cloud | temporarily slows movement and weakens jumps |
 | LasA / LasB / OMV | walking protease, flying protease, bouncing vesicle; stomp or shoot |
 | siderophore claw | competes for iron |
-| pink foam | rhamnolipid hazard |
-| mucus / cilia | sticky surfaces / directional conveyors |
+| pink foam | rhamnolipid hazard: static pools, geysers that bubble before they erupt, drifting clumps |
+| mucus / cilia | sticky surfaces / directional conveyors (CF airway) |
+| flow channel | directional conveyor in the culture levels (game metaphor) |
 | low debris | jump over, shoot, bump from below, or dash through as stk |
 | pale cracked cells | collapse 0.6 s after landing and return after 4 s; optional routes only |
 | air stone / swollen cell | ride a bubble / bounce upwards |
@@ -181,7 +191,9 @@ music falls under the same MIT license as the code.
   *P. aeruginosa*), staphyloxanthin as a timed shield, the air bubbles, swollen
   cells, the glycerol stock checkpoints, the `stk` dash, the `stp` glide,
   the advancing exposure front, mucus and
-  cilia as floor types, and which *P. aeruginosa* products appear where.
+  cilia as floor types, flow channels as conveyors in the culture levels,
+  rhamnolipid foam as pools, geysers and drifting clumps (their placement,
+  timing and amount are invented), and which *P. aeruginosa* products appear where.
 - **Decoration only:** the level art (a biofilm-like ground of packed cocci,
   matrix strands, tunnels, drifting molecules, cell clusters in the background,
   pink airway tissue in the CF level) is there for the look. It does not
@@ -237,25 +249,31 @@ exposure-front display; js/game.js contains physics, entities, drawing and audio
 ## Level building and verification
 
 Levels use tile coordinates. A floor at row 30 supports an entity at row 29.
-Use ground/solid for terrain, plat for permanent one-way strands, lysed for optional
-crumbling detours, carve for walk-in passages, and put for entities. vent, spring,
-ribo, rosgun, sign, arrow and landmark add their named objects. L.route lists
-main-route terrain waypoints used by the regression search.
+Use ground/solid for terrain, pit for gaps that drop out of the level, plat for
+permanent one-way strands, lysed for optional crumbling detours, carve for walk-in
+passages, cilia/flow for conveyors, foam for static foam, and put for entities.
+vent, spring, ribo, rosgun, geyser, drift, sign, arrow and landmark add their
+named objects. L.route lists main-route terrain waypoints used by the regression search.
 
-Keep main-route rises to two rows, use broad landing platforms and dry takeoffs,
-and leave a recovery floor below early jumps. A full single jump reaches about
-three rows. Mucus reduces that below two rows; place the next takeoff beyond it.
-Hide peptides on visible, reachable detours with a clear way back.
+Keep main-route rises to two rows and leave dry takeoffs. A full single jump
+reaches about three rows and clears about three tiles of foam from flat ground.
+Mucus reduces jump height below two rows; place the next takeoff beyond it.
+Never put foam under a low ceiling: the jump over it needs full headroom.
+Timed foam (geysers, drifting clumps) should cross a jump, not cover the only
+safe standing spot. Hide peptides on visible, reachable detours with a clear way back.
 
 Run node tests/game.test.cjs. The dependency-free checks cover every level and
 strain, removal of activation mechanics, sample and boss goals, dash collision,
 glide limits, checkpoint snapshots, timed retries, versioned records, ghosts,
 storage errors, scaling and pointer input. tests/routes.cjs searches the real
 collision functions through each main route using the basic single jump, with
-moving surfaces and crumbling platforms unavailable, and checks entry and return
-routes for the peptide detours. This proves a permanent main terrain route;
-it does not certify hazard balance, reaction time or visual layout
+moving surfaces and crumbling platforms unavailable, conveyors applied and any
+contact with static foam rejected, and checks entry and return routes for the
+peptide detours. This proves a permanent main terrain route; it does not certify
+timed hazards (geysers, drifting foam), reaction time or visual layout
 in a browser. tests/harness.cjs supplies a mock Canvas environment.
+Further checks cover geyser and drifting-foam damage, conveyors, foam only in
+PASN and CF levels, and the kill feed.
 Difficulty checks also cover the three buttons, Hard pacing, optional stations, easier timing and
 damage rules, unchanged terrain, and separation of Normal/study records.
 

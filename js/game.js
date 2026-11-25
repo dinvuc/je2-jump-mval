@@ -361,7 +361,7 @@ function loadLevel(i) {
     def, cols: b.cols, rows: b.rows, grid: b.grid, signs: b.signs, ribo: b.ribo, route: b.route,
     ents: b.ents.map(e => ({ ...e, x: e.tx * TILE, y: e.ty * TILE, alive: true, t: 0 })),
     time: 0, cam: 0, camY: 0, cystine: 0, ironBank: 0, ironTotal: 0, points: 0, goalMsgT: 0,
-    fx: [], pops: [], movers: [], shots: [], lysis: new Map(), solids: [], plats: [],
+    fx: [], pops: [], callouts: [], killFeed: [], killCount: {}, movers: [], shots: [], lysis: new Map(), solids: [], plats: [],
     combo: 0, comboT: 0, kills: 0, peptides: 0, spawnQ: [],
     retries: 0,
     difficulty: G.difficulty,
@@ -406,6 +406,8 @@ function initEntity(e) {
     case 'omv': e.vx = 1.5; e.vy = 0; break;
     case 'lasb': case 'pa': e.hx = e.x + 16; e.hy = e.y + 16; e.cx = e.hx; e.cy = e.hy; e.ang = 0; break;
     case 'twitch': e.dir = -1; break;
+    case 'geyser': e.h = e.h || 3; e.phase = e.phase || 0; break;
+    case 'drift': e.dx = e.dx || 0; e.dy = e.dy || 0; e.per = e.per || 240; e.phase = e.phase || 0; e.cx = e.x + 16; e.cy = e.y + 16; break;
     case 'spring': e.cool = 0; e.sq = 0; break;
     case 'rosgun': e.cool = 60 + (e.tx * 37) % 120; break;
     case 'boss': Object.assign(e, { bx: e.x + 16, by: (e.ty + 1) * TILE, hp: 20, maxHp: 20, state: 'idle', timer: 0, dir: 1, open: 0, vy: 0, jy: 0, hitT: 0, cycle: 0 }); break;
@@ -581,11 +583,38 @@ function enemyBox(e) {
   }
 }
 const ENEMY_COL = { lasa: '#b8404c', omv: '#8fb6e8', lasb: '#2f8f86', pa: '#5fae4f', twitch: '#5fae4f', sidero: '#c8e85a', rosb: '#ff7a3c' };
+// Foam geyser cycle (frames): rest, bubbling warning, then the column rises, holds and sinks.
+const GEYSER_CYCLE = 200, GEYSER_WARN = 90, GEYSER_UP = 130;
+function foamGeyserState(e) {
+  const ph = (e.t + e.phase) % GEYSER_CYCLE, full = e.h * TILE;
+  if (ph < GEYSER_WARN) return { warn: false, height: 0, ph };
+  if (ph < GEYSER_UP) return { warn: true, height: 0, ph };
+  const k = Math.min(1, (ph - GEYSER_UP) / 10, (GEYSER_CYCLE - ph) / 12);
+  return { warn: false, height: full * k, ph };
+}
+// Kill feed: a big stamped name where the enemy was, plus a running log in the HUD.
+const ENEMY_NAME = {
+  lasa: ['LasA', 'LasA protease'], lasb: ['LasB', 'LasB elastase'], omv: ['OMV', 'outer membrane vesicle'],
+  pa: ['P. aeruginosa', 'P. aeruginosa cell'], twitch: ['P. aeruginosa', 'twitching P. aeruginosa'],
+  sidero: ['siderophore', 'siderophore'], rosb: ['superoxide', 'superoxide radical'],
+  boss: ['mucoid colony', 'mucoid P. aeruginosa colony'],
+};
+function announceKill(type, x, y) {
+  const [short, long] = ENEMY_NAME[type] || [type, type];
+  const color = type === 'boss' ? '#9be07a' : ENEMY_COL[type] || '#ff8a96';
+  L.killCount[type] = (L.killCount[type] || 0) + 1;
+  L.callouts.push({ x, y: y - 40, text: short, color, life: 80, max: 80, tilt: (Math.random() - 0.5) * 0.24 });
+  const top = L.killFeed[0];
+  if (top && top.type === type) { top.n++; top.life = 260; top.bump = 12; }
+  else L.killFeed.unshift({ type, name: long, color, n: 1, life: 260, age: 0, bump: 0 });
+  if (L.killFeed.length > 4) L.killFeed.length = 4;
+}
 function killEnemy(e) {
   const b = enemyBox(e);
   e.alive = false;
   if (e.type !== 'rosb') L.kills++;   // a radical is not a P. aeruginosa product or cell
   else once('rosstomp', 'Superoxide neutralised. Antioxidant enzymes do this inside real cells.');
+  announceKill(e.type, b.x + b.w / 2, b.y);
   gain(200, b.x + b.w / 2, b.y, '#ff8a96');
   flash(b.x + b.w / 2, b.y + b.h / 2, 20);
   burst(b.x + b.w / 2, b.y + b.h / 2, ENEMY_COL[e.type] || '#b8404c', 16, 3.2);
@@ -611,6 +640,7 @@ function damageBoss(e, n) {
   AUDIO.play('bossHit');
   if (e.hp <= 0) {
     e.state = 'dead'; e.timer = 0; L.bossDown = true; L.kills++; L.points += 3000;
+    announceKill('boss', e.bx, e.by - 80);
     burst(e.bx, e.by - 40, '#c9f0a0', 40, 5); burst(e.bx, e.by - 40, '#5fae4f', 30, 4);
     G.shake = 16; AUDIO.play('bossDie'); AUDIO.music(L.def.name);
     toast('You cleared the mucoid P. aeruginosa colony! Now reach the sputum sample.', 260);
@@ -825,6 +855,10 @@ function updateFx() {
   if (L.fx.length) L.fx = L.fx.filter(p => p.life > 0);
   for (const p of L.pops) { p.y -= 0.7; p.life--; }
   if (L.pops.length) L.pops = L.pops.filter(p => p.life > 0);
+  for (const c of L.callouts) { c.life--; c.y -= c.life > 64 ? 1.6 : 0.2; }
+  if (L.callouts.length) L.callouts = L.callouts.filter(c => c.life > 0);
+  for (const k of L.killFeed) { k.life--; k.age++; if (k.bump > 0) k.bump--; }
+  if (L.killFeed.length) L.killFeed = L.killFeed.filter(k => k.life > 0);
 }
 // Points with a combo: pick things up quickly one after another for up to x5.
 function gain(base, x, y, color) {
@@ -975,6 +1009,7 @@ function updatePlay() {
     if (c === '~') { P.sticky = 1; once('mucus', 'Thick CF mucus: you are slow and cannot jump as high.'); }
     else if (c === '<') P.belt = -1.5;
     else if (c === '>') P.belt = 1.5;
+    if (P.belt) once('belt', L.def.theme.bg === 'cf' ? 'Beating cilia carry you along. Run against them, or jump off.' : 'A flow channel carries you along. Run against it, or jump off.');
   }
 
   for (const t of ['inv', 'slow', 'shield', 'magnet', 'phos', 'gold', 'repFlash', 'dizzy', 'damageT']) if (P[t] > 0) P[t]--;
@@ -1123,6 +1158,18 @@ function updateEntities() {
         const ph = e.t % 220;
         e.warn = ph > 110 && ph <= 140; e.active = ph > 140;
         if (e.active && overlap(P, { x: e.x - 18, y: e.y - 60, w: 68, h: 92 })) hurt('hcn', 'HCN (hydrogen cyanide) blocked your respiration.');
+        break;
+      }
+      case 'geyser': { // rhamnolipid foam that wells up in a column, with a bubbling warning first
+        const s = foamGeyserState(e);
+        e.warn = s.warn; e.active = s.height > 0;
+        if (e.active && overlap(P, { x: e.x + 5, y: e.y + TILE - s.height, w: 22, h: s.height })) hurt('foam', 'A column of rhamnolipid foam damaged your membrane.');
+        break;
+      }
+      case 'drift': { // a clump of rhamnolipid foam drifting along a fixed path
+        const a = (e.t + e.phase) / e.per * TAU;
+        e.cx = e.x + 16 + Math.sin(a) * e.dx * TILE; e.cy = e.y + 16 + Math.sin(a) * e.dy * TILE;
+        if (overlap(P, { x: e.cx - 12, y: e.cy - 11, w: 24, h: 22 })) hurt('foam', 'Drifting rhamnolipid foam damaged your membrane.');
         break;
       }
       case 'pa': { // a living P. aeruginosa cell (CF level only): swims towards you
@@ -1918,6 +1965,24 @@ function drawSpecialTiles(cx, cy) {
         const d = 4 + ((t * 0.2 + tx * 7) % 10);
         ctx.fillStyle = '#c3cc63'; ctx.beginPath(); ctx.ellipse(X + 16, Y + TILE + d / 2, 2.5, d / 2 + 2, 0, 0, TAU); ctx.fill();
       }
+    } else if ((c === '<' || c === '>') && L.def.theme.bg !== 'cf') { // a flow channel through the culture
+      const dir = c === '>' ? 1 : -1, th = L.def.theme;
+      const g = ctx.createLinearGradient(X, Y, X, Y + TILE);
+      g.addColorStop(0, mix(th.plat[1], '#ffffff', 0.25)); g.addColorStop(1, th.plat[0]);
+      ctx.fillStyle = g; ctx.fillRect(X, Y + 2, TILE, TILE - 2);
+      ctx.fillStyle = rgba(th.eps, 0.55); ctx.fillRect(X, Y + 2, TILE, 5);
+      ctx.save(); ctx.beginPath(); ctx.rect(X, Y, TILE, TILE); ctx.clip();
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      const off = ((t * 1.5 * dir) % 16 + 16) % 16;
+      for (let k = -1; k < 3; k++) {
+        const bx = X + k * 16 + off;
+        ctx.beginPath(); ctx.moveTo(bx - 3 * dir, Y + 11); ctx.lineTo(bx + 3 * dir, Y + 17); ctx.lineTo(bx - 3 * dir, Y + 23); ctx.stroke();
+      }
+      ctx.restore();
+      for (let k = 0; k < 2; k++) {   // streaming specks just above the surface
+        const sx = X + ((t * 1.5 * dir + k * 16 + tx * 11) % TILE + TILE) % TILE;
+        circle(sx, Y - 2 - k * 3, 1.6, rgba(th.eps, 0.8));
+      }
     } else if (c === '<' || c === '>') { // airway cells with beating cilia
       const dir = c === '>' ? 1 : -1;
       const g = ctx.createLinearGradient(X, Y, X, Y + TILE);
@@ -2244,6 +2309,42 @@ function drawEntities(cx, cy) {
         text('LasB', X, Y - 15, { size: 8, color: '#124a45', align: 'center', weight: '900' });
         break;
       }
+      case 'geyser': { // rhamnolipid foam well: a pink crater that bubbles, then erupts a column
+        const X = x + 16, base = y + TILE, s = foamGeyserState(e);
+        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(X, base - 1, 14, 3.5, 0, 0, TAU); ctx.fill();
+        roundRect(x + 4, base - 8, 24, 8, 4, '#c2457f', '#7d1b4f', 1.5);
+        circle(X, base - 6, 4, '#5c0f38');
+        if (s.warn) {
+          const k = (s.ph - GEYSER_WARN) / (GEYSER_UP - GEYSER_WARN);
+          glow(X, base - 8, 18 + k * 10, '#e0458f', 0.35 + k * 0.25);
+          for (let i = 0; i < 4; i++) {
+            const bx = X - 9 + i * 6 + Math.sin(e.t * 0.4 + i) * 1.5, by = base - 10 - ((e.t * 1.3 + i * 7) % (8 + k * 14));
+            ball(bx, by, 2.5 + k * 1.5, '#ffe0ef', '#e86aa9', '#9c2763');
+          }
+          if (Math.floor(e.t / 6) % 2 === 0) text('!', X, base - 28 - k * 6, { size: 15, color: '#c2185b', align: 'center', weight: '900' });
+        } else if (s.height > 0) {
+          glow(X, base - s.height / 2, 20 + s.height * 0.3, '#e0458f', 0.3);
+          for (let yy = 0; yy < s.height; yy += 9) {
+            const sway = Math.sin(e.t * 0.25 + yy * 0.15) * 3, r = 7 - (yy / (e.h * TILE)) * 2.5;
+            ball(X - 5 + sway, base - 6 - yy, r, '#ffe0ef', '#e86aa9', '#9c2763');
+            ball(X + 5 - sway, base - 10 - yy, r - 1, '#ffe0ef', '#e86aa9', '#9c2763');
+          }
+          ball(X, base - s.height - 2, 8, '#fff0f7', '#f08cbf', '#a32a68');
+        } else for (let k = 0; k < 2; k++) circle(X - 3 + k * 6, base - 9 - ((e.t * 0.3 + k * 9) % 10), 1.8, 'rgba(240,140,190,0.7)');
+        break;
+      }
+      case 'drift': { // a drifting clump of rhamnolipid foam
+        const X = e.cx, Y = e.cy;
+        glow(X, Y, 26, '#e0458f', 0.3);
+        for (const [dx, dy, r] of [[-7, 3, 7], [6, 4, 7.5], [0, -5, 8], [-2, 7, 5], [9, -3, 5]]) {
+          const w = Math.sin(e.t * 0.12 + dx) * 1.2;
+          ball(X + dx + w, Y + dy - w, r, '#ffe0ef', '#e86aa9', '#9c2763');
+        }
+        const rise = (e.t * 0.5) % 20;
+        ctx.strokeStyle = `rgba(232,106,169,${0.7 - rise / 28})`; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(X + 4, Y - 12 - rise, 2.2, 0, TAU); ctx.stroke();
+        break;
+      }
       case 'hcn': { // a vent that puffs hydrogen cyanide
         const X = x + 16, base = y + TILE;
         roundRect(x + 6, base - 7, 20, 7, 3, '#6d6a7a', '#4a4756', 1.2);
@@ -2384,6 +2485,58 @@ function drawFx() {
     ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y);
   }
   ctx.globalAlpha = 1;
+  drawCallouts();
+}
+
+// A stamped name where an enemy was defeated: it punches in large, settles, then fades.
+function drawCallouts() {
+  for (const c of L.callouts) {
+    const age = c.max - c.life, s = age < 10 ? 1 + Math.pow(1 - age / 10, 2) * 1.1 : 1;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, c.life / 22);
+    ctx.translate(c.x, c.y); ctx.rotate(c.tilt); ctx.scale(s, s);
+    ctx.font = `900 19px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.lineJoin = 'round';
+    const w = ctx.measureText(c.text).width;
+    ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(16,12,24,0.85)'; ctx.strokeText(c.text, 0, 0);
+    ctx.fillStyle = c.color; ctx.fillText(c.text, 0, 0);
+    // a slash drawn across the name in the first few frames
+    const k = Math.min(1, age / 9);
+    ctx.lineCap = 'round'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(16,12,24,0.85)';
+    ctx.beginPath(); ctx.moveTo(-w / 2 - 6, -3); ctx.lineTo(-w / 2 - 6 + (w + 12) * k, -9); ctx.stroke();
+    ctx.lineWidth = 2; ctx.strokeStyle = '#fff';
+    ctx.beginPath(); ctx.moveTo(-w / 2 - 6, -3); ctx.lineTo(-w / 2 - 6 + (w + 12) * k, -9); ctx.stroke();
+    ctx.font = `900 10px ${FONT}`; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(16,12,24,0.8)';
+    ctx.strokeText('NEUTRALISED', 0, 13); ctx.fillStyle = '#fff'; ctx.fillText('NEUTRALISED', 0, 13);
+    ctx.restore();
+  }
+}
+
+// HUD log of what you defeated, newest on top; repeats of the same enemy stack as ×n.
+function drawKillFeed() {
+  let y = 112;   // below the cough warning (CF) and the exposure panel (SNpulse)
+  for (const k of L.killFeed) {
+    const slide = Math.pow(Math.max(0, 1 - k.age / 14), 3) * 260;
+    const label = k.name;
+    ctx.font = `800 13px ${FONT}`;
+    const w = ctx.measureText(label).width + (k.n > 1 ? 74 : 44);
+    const x = VIEW_W - 16 - w + slide, s = 1 + (k.bump / 12) * 0.12;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, k.life / 30);
+    ctx.translate(x + w / 2, y + 12); ctx.scale(s, s); ctx.translate(-w / 2, -12);
+    roundRect(0, 0, w, 24, [12, 4, 4, 12], 'rgba(14,26,36,0.86)');
+    roundRect(w - 4, 0, 4, 24, [0, 4, 4, 0], k.color);
+    circle(14, 12, 8, k.color);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(10.5, 8.5); ctx.lineTo(17.5, 15.5); ctx.moveTo(17.5, 8.5); ctx.lineTo(10.5, 15.5); ctx.stroke();
+    text(label, 28, 17, { size: 13, color: '#fff', weight: '800' });
+    if (k.n > 1) {
+      const bx = w - 38;
+      roundRect(bx, 4, 28, 16, 8, k.color);
+      text(`×${k.n}`, bx + 14, 16, { size: 12, color: '#10141c', align: 'center', weight: '900' });
+    }
+    ctx.restore();
+    y += 28;
+  }
 }
 
 function drawPlayer() {
@@ -2689,6 +2842,7 @@ function drawWorld() {
   drawExposureFront(cx, cy);
   drawSignText(cx, cy);
   drawGoalList();
+  drawKillFeed();
   drawHUD();
   drawAbilityHUD();
 }
