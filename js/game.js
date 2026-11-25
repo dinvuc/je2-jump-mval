@@ -11,8 +11,11 @@ const TAU = Math.PI * 2;
 const GRAV = 0.55, MAX_FALL = 12;
 const RUN_ACC = 0.6, RUN_MAX = 3.8, FRICTION = 0.78;
 const JUMP_V = -10.6;
-const COYOTE = 6;   // frames you may still jump after walking off a ledge
+const COYOTE = 12;  // frames you may still jump after walking off a ledge (0.2 s)
 const BUFFER = 6;   // frames a jump press is remembered before landing
+const LYSIS_DELAY = 36, LYSIS_DOWN = 240;   // lysed cells: collapse after 0.6 s, back after 4 s
+const PHOS_TIME = 600;                      // phospho-switch stays ON for 10 s
+const PULSE_S = 900;                        // the SNpulse clock shows 15 min
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -21,40 +24,176 @@ const ctx = canvas.getContext('2d');
 const keys = {};      // held right now
 const pressed = {};   // pressed since last read (read with took())
 const KEYMAP = {
-  ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
-  ArrowUp: 'jump', KeyW: 'jump', Space: 'jump', Enter: 'ok',
-  KeyP: 'pause', Escape: 'pause', Digit1: 's1', Digit2: 's2', Digit3: 's3',
+  ArrowLeft: ['left'], KeyA: ['left'], ArrowRight: ['right'], KeyD: ['right'],
+  ArrowUp: ['jump', 'up'], KeyW: ['jump', 'up'], ArrowDown: ['down'], KeyS: ['down'],
+  Space: ['jump', 'confirm'], Enter: ['ok', 'confirm'],
+  KeyP: ['pause'], Escape: ['pause'], Digit1: ['s1'], Digit2: ['s2'], Digit3: ['s3'],
+  KeyM: ['mute'], KeyN: ['music'],
 };
 function press(k) { if (!keys[k]) pressed[k] = true; keys[k] = true; }
 function release(k) { keys[k] = false; }
 addEventListener('keydown', e => {
-  const k = KEYMAP[e.code];
-  if (!k) return;
+  AUDIO.unlock();
+  const ks = KEYMAP[e.code];
+  if (!ks) return;
   e.preventDefault();
-  press(k);
+  ks.forEach(press);
 });
-addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) release(k); });
+addEventListener('keyup', e => { const ks = KEYMAP[e.code]; if (ks) ks.forEach(release); });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+addEventListener('pointerdown', () => AUDIO.unlock());
 function took(k) { const p = !!pressed[k]; pressed[k] = false; return p; }
 function clearPressed() { for (const k in pressed) pressed[k] = false; }
+
+// ---- audio: synthesised effects and an original chiptune soundtrack ----------------
+// Everything is generated with Web Audio oscillators and noise: no sound files, no
+// samples, no third-party music. The soundtrack below was composed for this game.
+// The audio context only starts after a key press or click (browser rule).
+const AUDIO = (() => {
+  let ac = null, sfxBus = null, musBus = null, noise = null;
+  let sfxOn = true, musicOn = true;
+  try {
+    sfxOn = localStorage.getItem('je2jump_muted') !== '1';
+    musicOn = localStorage.getItem('je2jump_music') !== '0';
+  } catch { /* private mode */ }
+  const save = () => { try { localStorage.setItem('je2jump_muted', sfxOn ? '0' : '1'); localStorage.setItem('je2jump_music', musicOn ? '1' : '0'); } catch { /* private mode */ } };
+  const midi = n => 440 * Math.pow(2, (n - 69) / 12);
+
+  function init() {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    sfxBus = ac.createGain(); sfxBus.gain.value = 1; sfxBus.connect(ac.destination);
+    musBus = ac.createGain(); musBus.gain.value = 0.55; musBus.connect(ac.destination);
+    noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = noise.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    setInterval(schedule, 25);
+  }
+  function tone(f0, f1, dur, type, vol, t, bus) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(bus); o.start(t); o.stop(t + dur + 0.03);
+  }
+  function hiss(dur, vol, t, freq, bus) {
+    const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    s.buffer = noise; f.type = 'highpass'; f.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f).connect(g).connect(bus); s.start(t); s.stop(t + dur + 0.02);
+  }
+
+  // -- sound effects --
+  const fx = (f0, f1, dur, type = 'square', vol = 0.05, delay = 0) => tone(f0, f1, dur, type, vol, ac.currentTime + delay, sfxBus);
+  const arp = (fs, step, type = 'triangle', vol = 0.05, dur = 0.12) => fs.forEach((f, i) => fx(f, f, dur, type, vol, i * step));
+  const SOUNDS = {
+    jump: () => fx(300, 560, 0.12, 'square', 0.03),
+    dj: () => fx(520, 1040, 0.14, 'triangle', 0.05),
+    cys: k => { const m = 1 + 0.12 * (k - 1); fx(880 * m, 880 * m, 0.06, 'square', 0.025); fx(1320 * m, 1320 * m, 0.09, 'square', 0.025, 0.05); },
+    iron: k => { const m = 1 + 0.12 * (k - 1); fx(520 * m, 980 * m, 0.14, 'triangle', 0.06); },
+    power: () => arp([523, 659, 784, 1047], 0.06),
+    hurt: () => fx(220, 70, 0.3, 'sawtooth', 0.05),
+    stomp: () => fx(420, 110, 0.16, 'square', 0.045),
+    check: () => arp([784, 1175], 0.08, 'sine', 0.06),
+    pop: () => fx(900, 300, 0.08, 'sine', 0.04),
+    crack: () => { fx(170, 55, 0.14, 'sawtooth', 0.035); hiss(0.12, 0.05, ac.currentTime, 1500, sfxBus); },
+    signal: () => arp([392, 523, 659, 784, 1047], 0.05, 'sine', 0.05, 0.18),
+    off: () => arp([660, 440], 0.08, 'sine', 0.04),
+    done: () => arp([523, 659, 784, 1047, 1319], 0.09, 'triangle', 0.06, 0.16),
+    fail: () => arp([392, 330, 262, 196], 0.14, 'triangle', 0.06, 0.2),
+    click: () => fx(660, 660, 0.05, 'square', 0.03),
+    move: () => fx(440, 440, 0.03, 'square', 0.02),
+  };
+
+  // -- the soundtrack: 8 bars (128 sixteenth steps), chords C Am F G | C Am F G --
+  // Melody notes: [step, midi note, length in steps]. Original composition.
+  const MELODY = [
+    [0, 76, 2], [2, 79, 2], [4, 84, 3], [8, 83, 1], [9, 84, 1], [10, 79, 2], [12, 76, 4],
+    [16, 81, 2], [18, 84, 2], [20, 88, 3], [24, 86, 1], [25, 84, 1], [26, 83, 2], [28, 81, 4],
+    [32, 77, 2], [34, 81, 2], [36, 84, 2], [38, 86, 2], [40, 84, 2], [42, 81, 2], [44, 77, 2], [46, 79, 2],
+    [48, 79, 3], [51, 81, 1], [52, 83, 2], [54, 86, 2], [56, 91, 4], [60, 86, 2], [62, 83, 2],
+    [64, 79, 1], [65, 79, 1], [66, 84, 2], [68, 88, 2], [70, 91, 2], [72, 88, 2], [74, 84, 2], [76, 86, 4],
+    [80, 88, 3], [83, 86, 1], [84, 84, 2], [86, 81, 2], [88, 84, 4], [92, 88, 4],
+    [96, 89, 2], [98, 88, 2], [100, 86, 2], [102, 84, 2], [104, 81, 4], [108, 84, 2], [110, 86, 2],
+    [112, 83, 4], [116, 86, 2], [118, 83, 2], [120, 79, 8],
+  ];
+  const CHORDS = [[48, 52, 55], [45, 48, 52], [41, 45, 48], [43, 47, 50]];   // C, Am, F, G
+  const melodyAt = new Map(MELODY.map(m => [m[0], m]));
+  // Per-medium arrangements: tempo, transposition, minor mode, lead sound, drum density.
+  const SONGS = {
+    title: { bpm: 108, tr: 0, minor: false, lead: 'square', drums: 1 },
+    TSB: { bpm: 116, tr: 0, minor: false, lead: 'square', drums: 1 },
+    SNpulse: { bpm: 138, tr: 2, minor: false, lead: 'square', drums: 2 },
+    SN: { bpm: 100, tr: -3, minor: true, lead: 'triangle', drums: 1 },
+  };
+  let song = null, step = 0, nextT = 0;
+  const pitch = n => {
+    if (song.minor) { const pc = ((n % 12) + 12) % 12; if (pc === 4 || pc === 9 || pc === 11) n -= 1; }   // major -> natural minor
+    return midi(n + song.tr);
+  };
+  function playStep(s, t) {
+    const sp = 60 / song.bpm / 4, bar = Math.floor(s / 16), chord = CHORDS[bar % 4], inBar = s % 16;
+    const m = melodyAt.get(s);
+    if (m) tone(pitch(m[1]), pitch(m[1]), m[2] * sp * 0.95, song.lead, song.lead === 'square' ? 0.035 : 0.07, t, musBus);
+    if (inBar % 2 === 0) {                                   // bouncy octave bass
+      const n = chord[0] - 12 + (inBar % 4 === 2 ? 12 : 0);
+      tone(pitch(n), pitch(n), sp * 1.6, 'triangle', 0.11, t, musBus);
+    }
+    const an = chord[inBar % 3] + 12;                        // soft arpeggio
+    tone(pitch(an), pitch(an), sp * 0.9, 'sine', 0.025, t, musBus);
+    if (inBar === 0 || inBar === 8 || (song.drums > 1 && inBar === 10)) tone(150, 45, 0.14, 'sine', 0.22, t, musBus);   // kick
+    if (inBar === 4 || inBar === 12) hiss(0.11, 0.07, t, 1200, musBus);                                                  // snare
+    if (song.drums > 1 ? true : inBar % 2 === 0) hiss(0.03, inBar % 4 === 2 ? 0.035 : 0.018, t, 7000, musBus);          // hi-hat
+  }
+  function schedule() {
+    if (!ac || !song || !musicOn) return;
+    if (nextT < ac.currentTime - 0.2) nextT = ac.currentTime + 0.05;   // tab was in the background
+    while (nextT < ac.currentTime + 0.12) {
+      playStep(step, nextT);
+      nextT += 60 / song.bpm / 4;
+      step = (step + 1) % 128;
+    }
+  }
+
+  return {
+    play(name, arg = 1) { if (ac && sfxOn && SOUNDS[name]) SOUNDS[name](arg); },
+    unlock() {
+      if (!ac) { try { init(); } catch { return; } }
+      if (ac.state === 'suspended') ac.resume();
+    },
+    music(name) {
+      const s = SONGS[name] || SONGS.title;
+      if (s === song) return;
+      song = s; step = 0; if (ac) nextT = ac.currentTime + 0.08;
+    },
+    duck(on) { if (musBus) musBus.gain.setTargetAtTime(on ? 0.15 : 0.55, ac.currentTime, 0.1); },
+    toggleSfx() { sfxOn = !sfxOn; save(); },
+    toggleMusic() { musicOn = !musicOn; save(); if (ac) nextT = ac.currentTime + 0.05; },
+    get sfxOn() { return sfxOn; },
+    get musicOn() { return musicOn; },
+  };
+})();
 
 // Touch buttons (only shown on touch screens).
 const touchBox = document.getElementById('touch');
 if (matchMedia('(pointer: coarse)').matches) touchBox.hidden = false;
 for (const b of touchBox.querySelectorAll('button')) {
   const k = b.dataset.key;
-  b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); press(k); });
+  b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); AUDIO.unlock(); press(k); });
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, () => release(k));
 }
 
-// Clicks / taps on the canvas: choose a strain on the title screen, otherwise "continue".
+// Clicks / taps on the canvas: strain cards on the title, items in the pause menu,
+// otherwise "continue".
 canvas.addEventListener('pointerdown', e => {
   const r = canvas.getBoundingClientRect();
   const x = (e.clientX - r.left) * VIEW_W / r.width;
   const y = (e.clientY - r.top) * VIEW_H / r.height;
   if (G.state === 'title') {
     const hit = strainCards().find(c => x > c.x && x < c.x + c.w && y > c.y && y < c.y + c.h);
-    if (hit) { G.strain = hit.key; startGame(); }
+    if (hit) { G.strain = hit.key; AUDIO.play('click'); startGame(); }
+  } else if (G.state === 'paused') {
+    const i = menuRects().findIndex(m => x > m.x && x < m.x + m.w && y > m.y && y < m.y + m.h);
+    if (i >= 0) { G.menuIdx = i; menuSelect(); }
   } else if (G.state !== 'play') {
     pressed.ok = true;
   }
@@ -85,11 +224,15 @@ function mix(h1, h2, t) {
 }
 
 // ---- game state ------------------------------------------------------------------
-const G = { state: 'title', strain: 'anc', levelIdx: 0, score: 0, results: [], toast: '', toastT: 0, best: loadBest(), seen: {} };
+const G = { state: 'title', strain: 'anc', levelIdx: 0, score: 0, results: [], toast: '', toastT: 0, best: loadBest(), seen: {}, shake: 0, menuIdx: 0 };
 let L = null;  // the running level
 let P = null;  // the player
 
-function setState(s) { G.state = s; clearPressed(); }
+function setState(s) {
+  G.state = s; clearPressed();
+  AUDIO.music(s === 'title' ? 'title' : L ? L.def.name : 'title');
+  AUDIO.duck(s === 'paused');
+}
 
 function startGame() {
   G.levelIdx = 0; G.score = 0; G.results = []; G.seen = {};
@@ -104,22 +247,44 @@ function loadLevel(i) {
     def, cols: b.cols, rows: b.rows, grid: b.grid, signs: b.signs,
     ents: b.ents.map(e => ({ ...e, x: e.tx * TILE, y: e.ty * TILE, alive: true, t: 0 })),
     time: 0, cam: 0, camY: 0, cystine: 0, ironBank: 0, ironTotal: 0, points: 0, goalMsgT: 0,
-    fx: [], art: buildLevelArt(b, def.theme, i),
+    fx: [], pops: [], movers: [], blocks: [], lysis: new Map(), chan: {}, solids: [], plats: [],
+    combo: 0, comboT: 0,
+    art: buildLevelArt(b, def.theme, i),
   };
-  for (const e of L.ents) {
-    if (e.type === 'lasa') { e.w = 28; e.h = 22; e.y = e.ty * TILE + TILE - e.h; e.vx = -1.1; }
-    if (e.type === 'sidero') { e.hx = e.x + 16; e.hy = e.y + 16; e.cx = e.hx; e.cy = e.hy; e.cool = 0; }
-    if (e.type === 'hqno') { e.cx = e.x + 16; e.cy = e.y + 16; }   // drawn before its first update
+  L.totalCys = L.ents.filter(e => e.type === 'cystine').length;
+  for (const e of L.ents) initEntity(e);
+  for (const e of L.ents) if (e.ch && (e.type === 'gate' || e.type === 'shuttle')) {
+    const src = L.ents.find(o => (o.type === 'agrc' || o.type === 'phos') && o.ch === e.ch);
+    e.src = src ? src.type : '';
   }
   const start = L.ents.find(e => e.type === 'start');
   L.respawn = { x: start.x + 4, y: start.y + 4 };
   P = {
     x: L.respawn.x, y: L.respawn.y, w: 24, h: 28, vx: 0, vy: 0,
     onGround: false, coyote: 0, buffer: 0, djReady: true, groundT: 0,
-    face: 1, inv: 0, slow: 0, shield: 0, magnet: 0, phos: 0, reps: 3, squash: 0,
+    face: 1, inv: 0, slow: 0, shield: 0, magnet: 0, phos: 0, reps: 3, squash: 0, ride: null, roll: 0,
   };
-  G.toast = ''; G.toastT = 0; G.failReason = '';
+  G.toast = ''; G.toastT = 0; G.failReason = ''; G.shake = 0;
+  L.solids = dynSolids();
   snapCamera();
+}
+
+function initEntity(e) {
+  switch (e.type) {
+    case 'lasa': e.w = 28; e.h = 22; e.y = e.ty * TILE + TILE - e.h; e.vx = -1.1; break;
+    case 'sidero': e.hx = e.x + 16; e.hy = e.y + 16; e.cx = e.hx; e.cy = e.hy; e.cool = 0; break;
+    case 'hqno': e.cx = e.x + 16; e.cy = e.y + 16; break;   // drawn before its first update
+    case 'vent': e.cool = 20; e.rise = e.rise || 10; break;
+    case 'gate': e.h = e.h || 4; e.open = 0; break;
+    case 'shuttle':
+      e.len = e.len || 3; e.x0 = e.x; e.y0 = e.y; e.x1 = e.to[0] * TILE; e.y1 = e.to[1] * TILE;
+      e.px = e.x; e.py = e.y; e.dir = 1; e.dx = 0; e.dy = 0; e.wait = 0;
+      e.top = e.py; e.pl = e.px; e.pr = e.px + e.len * TILE;
+      break;
+    case 'agrb': e.cool = 0; e.block = { x: e.x + TILE, y: e.y, w: TILE, h: TILE, vy: 0, home: e, docked: false, block: true }; L.blocks.push(e.block); break;
+    case 'agrc': e.on = false; break;
+    case 'phos': e.timer = 0; break;
+  }
 }
 
 function toast(text, frames = 200) { G.toast = text; G.toastT = frames; }
@@ -144,10 +309,24 @@ function followCamera() {
 }
 
 // ---- tiles -----------------------------------------------------------------------
+// '#' solid, '=' strand (one-way), '%' lysed cells (one-way, collapse), '^' foam.
 function tileAt(tx, ty) {
   if (tx < 0 || tx >= L.cols) return '#';   // invisible walls at both ends
   if (ty < 0 || ty >= L.rows) return ' ';   // open above, a pit below
-  return L.grid[ty][tx];
+  const c = L.grid[ty][tx];
+  if (c === '%') { const s = L.lysis.get(ty * L.cols + tx); if (s && s.down > 0) return ' '; }
+  return c;
+}
+const oneWay = c => c === '=' || c === '%';
+
+// Dynamic solids: closed gates and AIP blocks.
+function dynSolids() {
+  const out = [];
+  for (const e of L.ents) if (e.type === 'gate') {
+    const h = e.h * TILE * (1 - e.open);
+    if (h > 2) out.push({ x: e.x + 4, y: e.y, w: TILE - 8, h, gate: e });
+  }
+  return out.concat(L.blocks);
 }
 
 function moveX() {
@@ -160,25 +339,54 @@ function moveX() {
     const tx = Math.floor(P.x / TILE);
     for (let ty = top; ty <= bot; ty++) if (tileAt(tx, ty) === '#') { P.x = (tx + 1) * TILE; P.vx = 0; break; }
   }
+  for (const r of L.solids) {
+    if (!overlap(P, r) || P.y + P.h <= r.y + 6) continue;   // standing on top is moveY's job
+    if (r.block && !r.docked && P.vx !== 0) {
+      pushBlock(r, P.vx > 0 ? P.x + P.w - r.x : P.x - (r.x + r.w));
+      P.vx = clamp(P.vx, -1.9, 1.9);                         // pushing is slower
+    }
+    if (!overlap(P, r)) continue;
+    if (P.x + P.w / 2 < r.x + r.w / 2) P.x = r.x - P.w; else P.x = r.x + r.w;
+  }
 }
 
 function moveY() {
   const prevBottom = P.y + P.h;
   P.y += P.vy;
   P.onGround = false;
+  const rode = P.ride; P.ride = null;
   const left = Math.floor(P.x / TILE), right = Math.floor((P.x + P.w - 1) / TILE);
   if (P.vy > 0) {
-    const ty = Math.floor((P.y + P.h - 1) / TILE);
-    for (let tx = left; tx <= right; tx++) {
-      const c = tileAt(tx, ty);
-      // '=' strands only hold you when you come from above.
-      if (c === '#' || (c === '=' && prevBottom <= ty * TILE + 0.5)) {
-        P.y = ty * TILE - P.h; P.vy = 0; P.onGround = true; break;
+    // a) the tile row just under the feet: land on it if we came from above
+    //    (this also keeps you standing: each frame gravity pushes the feet a
+    //    fraction of a pixel into that row and we put you back on top).
+    const R = Math.floor((P.y + P.h) / TILE);
+    if (prevBottom <= R * TILE + 0.5) {
+      for (let tx = left; tx <= right; tx++) {
+        const c = tileAt(tx, R);
+        if (c === '#' || oneWay(c)) { P.y = R * TILE - P.h; P.vy = 0; P.onGround = true; break; }
       }
+    }
+    // b) solid tiles we have sunk into
+    if (!P.onGround) {
+      const ty = Math.floor((P.y + P.h - 1) / TILE);
+      for (let tx = left; tx <= right; tx++) if (tileAt(tx, ty) === '#') { P.y = ty * TILE - P.h; P.vy = 0; P.onGround = true; break; }
     }
   } else if (P.vy < 0) {
     const ty = Math.floor(P.y / TILE);
     for (let tx = left; tx <= right; tx++) if (tileAt(tx, ty) === '#') { P.y = (ty + 1) * TILE; P.vy = 0; break; }
+  }
+  // Moving platforms (air bubbles, bridges): one-way, they carry you. They can
+  // also lift you off the floor when they rise through your feet.
+  if (P.vy >= 0) for (const m of L.plats) {
+    if (P.x + P.w > m.pl + 2 && P.x < m.pr - 2 && prevBottom <= m.top + 2 + (m === rode ? 2 : 0) && P.y + P.h >= m.top - 0.01) {
+      P.y = m.top - P.h; P.vy = 0; P.onGround = true; P.ride = m; break;
+    }
+  }
+  for (const r of L.solids) {
+    if (!overlap(P, r)) continue;
+    if (P.vy >= 0 && prevBottom <= r.y + 2) { P.y = r.y - P.h; P.vy = 0; P.onGround = true; P.ride = null; }
+    else if (P.vy < 0 && prevBottom - P.h >= r.y + r.h - 2) { P.y = r.y + r.h; P.vy = 0; }
   }
 }
 
@@ -192,7 +400,140 @@ function inFoam() {
   return false;
 }
 
-// ---- particles (pure decoration) -------------------------------------------------
+// ---- lysed cells: collapse shortly after you land on them -------------------------
+function touchLysis() {
+  if (!P.onGround || P.ride) return;
+  const ty = Math.floor((P.y + P.h + 1) / TILE);
+  for (let tx = Math.floor(P.x / TILE); tx <= Math.floor((P.x + P.w - 1) / TILE); tx++) {
+    if (tileAt(tx, ty) !== '%' || L.lysis.has(ty * L.cols + tx)) continue;
+    // the whole strip of lysed cells starts to give way
+    let a = tx, b = tx;
+    while (a > 0 && L.grid[ty][a - 1] === '%') a--;
+    while (b < L.cols - 1 && L.grid[ty][b + 1] === '%') b++;
+    for (let x = a; x <= b; x++) if (!L.lysis.has(ty * L.cols + x)) L.lysis.set(ty * L.cols + x, { t: 0, down: 0 });
+  }
+}
+function updateLysis() {
+  let cracked = false;
+  for (const [k, s] of L.lysis) {
+    if (s.down > 0) { if (--s.down === 0) L.lysis.delete(k); continue; }
+    if (++s.t >= LYSIS_DELAY) {
+      s.down = LYSIS_DOWN; cracked = true;
+      const tx = k % L.cols, ty = (k - tx) / L.cols;
+      burst(tx * TILE + 16, ty * TILE + 6, '#efe4bf', 6, 2.2);
+    }
+  }
+  if (cracked) { AUDIO.play('crack'); G.shake = Math.max(G.shake, 3); }
+}
+
+// ---- puzzles: AIP blocks, AgrC receptors, gates, phospho-switches, moving bridges ----
+function pushBlock(b, d) {
+  if (!d) return;
+  b.x += d;
+  const top = Math.floor(b.y / TILE), bot = Math.floor((b.y + b.h - 1) / TILE);
+  const tx = Math.floor((d > 0 ? b.x + b.w - 1 : b.x) / TILE);
+  for (let ty = top; ty <= bot; ty++) if (tileAt(tx, ty) === '#') { b.x = d > 0 ? tx * TILE - b.w : (tx + 1) * TILE; break; }
+  for (const r of L.solids) if (r !== b && overlap(b, r)) b.x = d > 0 ? r.x - b.w : r.x + r.w;
+}
+function resetBlock(b) {
+  for (const e of L.ents) if (e.type === 'agrc' && e.block === b) { e.on = false; e.block = null; }
+  b.x = b.home.x + TILE; b.y = b.home.y; b.vy = 0; b.docked = false;
+}
+function updateBlocks() {
+  for (const b of L.blocks) {
+    if (b.docked) continue;
+    const col = Math.floor((b.x + b.w / 2) / TILE);
+    const below = tileAt(col, Math.round((b.y + b.h) / TILE));
+    const resting = b.vy === 0 && Math.abs((b.y + b.h) % TILE) < 0.01 && (below === '#' || oneWay(below));
+    if (resting) continue;
+    if (b.vy === 0) b.x = col * TILE;   // tips into the column under its centre (e.g. a receptor notch)
+    b.vy = Math.min(b.vy + GRAV, MAX_FALL);
+    const prevB = b.y + b.h;
+    b.y += b.vy;
+    for (let R = Math.ceil(prevB / TILE - 1e-6); R * TILE <= b.y + b.h; R++) {
+      const c = tileAt(col, R);
+      if (c === '#' || oneWay(c)) {
+        b.y = R * TILE - b.h; b.vy = 0;
+        const rec = L.ents.find(e => e.type === 'agrc' && e.tx === col && e.ty === R - 1);
+        if (rec && !rec.on) {
+          b.docked = true; rec.on = true; rec.block = b;
+          burst(b.x + 16, b.y + 16, '#7be08f', 18, 3);
+          once('agrc', 'AIP bound to its receptor AgrC: the signal is ON!');
+        }
+        break;
+      }
+    }
+    if (b.y > L.rows * TILE + 64) resetBlock(b);
+  }
+}
+function signalOn(ch) {
+  AUDIO.play('signal');
+  const src = L.ents.find(o => (o.type === 'agrc' || o.type === 'phos') && o.ch === ch);
+  for (const t of L.ents) if (t.ch === ch && (t.type === 'gate' || t.type === 'shuttle') && src) {
+    const sx = src.x + 16, sy = src.y + 16, tx = t.x + 16, ty = t.y + 16;
+    for (let i = 0; i < 16; i++) {
+      const f = 40 + i * 2;
+      L.fx.push({ x: sx, y: sy, vx: (tx - sx) / f, vy: (ty - sy) / f, grav: 0, life: f, max: f, color: '#b98ae6', r: 2.5 });
+    }
+  }
+}
+function updatePuzzles() {
+  const chan = {};
+  for (const e of L.ents) {
+    if (e.type === 'agrc' && e.on) chan[e.ch] = true;
+    if (e.type === 'phos' && e.timer > 0) {
+      chan[e.ch] = true;
+      if (--e.timer === 0) { AUDIO.play('off'); toast('A phosphatase removed the phosphate: switch OFF.', 120); }
+    }
+  }
+  for (const ch in chan) if (!L.chan[ch]) signalOn(ch);
+  L.chan = chan;
+  for (const e of L.ents) {
+    if (e.type === 'gate') {
+      if (chan[e.ch]) e.open = Math.min(1, e.open + 0.035);
+      else if (e.open > 0 && !overlap(P, { x: e.x, y: e.y, w: TILE, h: e.h * TILE })) e.open = Math.max(0, e.open - 0.05);
+    } else if (e.type === 'shuttle') {
+      const on = !e.ch || chan[e.ch];
+      const tx = on && e.dir > 0 ? e.x1 : e.x0, ty = on && e.dir > 0 ? e.y1 : e.y0;
+      e.dx = 0; e.dy = 0;
+      if (e.wait > 0) e.wait--;
+      else {
+        const d = dist(tx, ty, e.px, e.py), sp = 1.4;
+        if (d <= sp) { e.dx = tx - e.px; e.dy = ty - e.py; if (on && d > 0) { e.dir = -e.dir; e.wait = 40; } }
+        else { e.dx = (tx - e.px) / d * sp; e.dy = (ty - e.py) / d * sp; }
+      }
+      e.px += e.dx; e.py += e.dy;
+      e.top = e.py; e.pl = e.px; e.pr = e.px + e.len * TILE;
+    }
+  }
+}
+
+// Air bubbles rise from vents and carry you up.
+function updateMovers() {
+  for (const e of L.ents) {
+    if (e.type !== 'vent') continue;
+    if (Math.abs(e.x - P.x) < VIEW_W && Math.abs(e.y - P.y) < VIEW_H * 1.3 && --e.cool <= 0) {
+      e.cool = 170;
+      // starts just below the floor surface, so it scoops up a cell standing on the vent
+      L.movers.push({ x: e.x + 16, y: e.y + TILE + 19, r: 17, t: 0, dx: 0, dy: 0, topY: (e.ty - e.rise) * TILE + 16, alive: true });
+    }
+  }
+  for (const b of L.movers) {
+    b.t++;
+    b.dy = b.t < 12 ? -0.4 : -1.3;
+    b.y += b.dy;
+    b.top = b.y - b.r + 4; b.pl = b.x - b.r; b.pr = b.x + b.r;
+    const roof = tileAt(Math.floor(b.x / TILE), Math.floor((b.y - b.r - 34) / TILE)) === '#';
+    if (b.y <= b.topY || roof) {
+      b.alive = false;
+      burst(b.x, b.y, 'rgba(255,255,255,0.9)', 10, 2.4, 0.02, 24);
+      AUDIO.play('pop');
+    }
+  }
+  L.movers = L.movers.filter(b => b.alive);
+}
+
+// ---- particles and score pop-ups (decoration) -------------------------------------
 function burst(x, y, color, n = 10, speed = 3, grav = 0.08, life = 32) {
   for (let i = 0; i < n; i++) {
     const a = Math.random() * TAU, s = speed * (0.35 + Math.random() * 0.8);
@@ -200,30 +541,43 @@ function burst(x, y, color, n = 10, speed = 3, grav = 0.08, life = 32) {
   }
 }
 function updateFx() {
-  for (const p of L.fx) { p.x += p.vx; p.y += p.vy; p.vy += p.grav; p.vx *= 0.95; p.life--; }
+  for (const p of L.fx) { p.x += p.vx; p.y += p.vy; p.vy += p.grav; if (p.grav) p.vx *= 0.95; p.life--; }
   if (L.fx.length) L.fx = L.fx.filter(p => p.life > 0);
+  for (const p of L.pops) { p.y -= 0.7; p.life--; }
+  if (L.pops.length) L.pops = L.pops.filter(p => p.life > 0);
+}
+// Points with a combo: pick things up quickly one after another for up to x5.
+function gain(base, x, y, color) {
+  L.combo = L.comboT > 0 ? L.combo + 1 : 1;
+  L.comboT = 100;
+  const m = Math.min(L.combo, 5), pts = base * m;
+  L.points += pts;
+  L.pops.push({ x, y: y - 8, text: m > 1 ? `+${pts} x${m}` : `+${pts}`, color, life: 50 });
+  return m;
 }
 
 // ---- damage ----------------------------------------------------------------------
 function loseReplicate(msg) {
   P.reps--;
   toast(P.reps > 0 ? `${msg}  Replicates left: ${P.reps}/3` : msg);
-  if (P.reps <= 0) setState('gameOver');
+  if (P.reps <= 0) { setState('gameOver'); AUDIO.play('fail'); }
 }
 function hurt(kind, msg) {
   if (P.inv > 0) return;
   if (kind === 'ros' && P.shield > 0) {
     P.shield = 0; P.inv = 40;
     burst(P.x + P.w / 2, P.y + P.h / 2, '#7fb6ff', 14, 3);
+    AUDIO.play('pop');
     toast('AhpC absorbed the ROS. Shield used up.');
     return;
   }
   P.inv = 90; P.vy = -6; P.vx = -P.face * 3;
   burst(P.x + P.w / 2, P.y + P.h / 2, '#e0465a', 12, 3);
+  G.shake = 10; AUDIO.play('hurt');
   loseReplicate(msg);
 }
 function respawn() {
-  P.x = L.respawn.x; P.y = L.respawn.y; P.vx = 0; P.vy = 0; P.inv = 60; P.slow = 0;
+  P.x = L.respawn.x; P.y = L.respawn.y; P.vx = 0; P.vy = 0; P.inv = 60; P.slow = 0; P.ride = null;
   snapCamera();
 }
 
@@ -235,8 +589,24 @@ function updatePlay() {
   if (L.def.timeLimit && L.time / 60 > L.def.timeLimit) {
     toast('The 15-min pulse ended before your sample reached the MS.');
     setState('gameOver');
+    AUDIO.play('fail');
     G.failReason = 'pulse';
     return;
+  }
+
+  updatePuzzles();
+  updateMovers();
+  updateBlocks();
+  updateLysis();
+  L.solids = dynSolids();
+  L.plats = L.movers.concat(L.ents.filter(e => e.type === 'shuttle'));
+  // Ride along with the platform you stand on.
+  if (P.ride) {
+    if (P.ride.alive === false) P.ride = null;
+    else {
+      P.y += P.ride.dy;
+      if (P.ride.dx) { const v = P.vx; P.vx = P.ride.dx; moveX(); P.vx = v; }
+    }
   }
 
   // Run. HQNO ("slow") lowers top speed and jump power.
@@ -256,11 +626,13 @@ function updatePlay() {
   if (P.buffer > 0) {
     if (P.coyote > 0) {
       P.vy = JUMP_V * (P.slow > 0 ? 0.85 : 1);
-      P.coyote = 0; P.buffer = 0; P.squash = -0.22;
+      P.coyote = 0; P.buffer = 0; P.squash = -0.22; P.ride = null;
+      AUDIO.play('jump');
     } else if (S.doubleJump > 0 && P.djReady) {
       P.vy = JUMP_V * S.doubleJump * (P.slow > 0 ? 0.85 : 1);
       P.djReady = false; P.buffer = 0; P.phos = 30; P.squash = -0.18;   // little "P" badge = phosphorylated
       burst(P.x + P.w / 2, P.y + P.h, '#b98ae6', 8, 2, 0.05, 22);
+      AUDIO.play('dj');
     } else if (S.doubleJump === 0 && !P.onGround) {
       once('nodj', 'stk: no Stk1 kinase, so no double jump. Time your jumps!');
     }
@@ -276,6 +648,11 @@ function updatePlay() {
     burst(P.x + P.w / 2, P.y + P.h, rgba(L.def.theme.eps, 0.9), 6, 1.6, -0.02, 26);
   }
   P.squash *= 0.82;
+  P.roll += P.vx / 14;                                // the cell rolls as it moves
+  if (P.onGround && Math.abs(P.vx) > 2.8 && L.time % 7 === 0) {
+    burst(P.x + P.w / 2 - P.face * 8, P.y + P.h - 2, rgba(L.def.theme.eps, 0.8), 1, 0.6, -0.03, 20);
+  }
+  touchLysis();
 
   for (const t of ['inv', 'slow', 'shield', 'magnet', 'phos']) if (P[t] > 0) P[t]--;
 
@@ -283,6 +660,7 @@ function updatePlay() {
   if (G.state !== 'play') return;
   if (P.y > L.rows * TILE + 64) {
     P.inv = 0;
+    G.shake = 8; AUDIO.play('hurt');
     loseReplicate('You fell out of the culture.');
     if (G.state !== 'play') return;
     respawn();
@@ -293,6 +671,8 @@ function updatePlay() {
   followCamera();
   if (G.toastT > 0) G.toastT--;
   if (L.goalMsgT > 0) L.goalMsgT--;
+  if (L.comboT > 0) L.comboT--;
+  G.shake = G.shake > 0.5 ? G.shake * 0.85 : 0;
 }
 
 function updateEntities() {
@@ -310,14 +690,16 @@ function updateEntities() {
           e.x += (pcx - cx) / d * 5; e.y += (pcy - cy) / d * 5;
         }
         if (dist(cx, cy, pcx, pcy) < 24) {
-          e.alive = false; L.cystine++; L.points += 100;
+          e.alive = false; L.cystine++;
+          AUDIO.play('cys', gain(100, cx, cy, '#ffe36a'));
           burst(cx, cy, '#f5d33a', 12, 2.6);
           once('cys', 'L-cystine! A source of sulfur for the cell.');
         }
         break;
       case 'iron':
         if (dist(cx, cy, pcx, pcy) < 24) {
-          e.alive = false; L.ironTotal++; L.ironBank++; L.points += 50;
+          e.alive = false; L.ironTotal++; L.ironBank++;
+          AUDIO.play('iron', gain(50, cx, cy, '#ff9a62'));
           burst(cx, cy, '#e0743c', 12, 2.6);
           if (L.ironBank >= 3) {
             L.ironBank = 0;
@@ -327,16 +709,17 @@ function updateEntities() {
         }
         break;
       case 'ahpc':
-        if (dist(cx, cy, pcx, pcy) < 26) { e.alive = false; P.shield = 60 * 20; burst(cx, cy, '#7fb6ff', 14, 3); toast('AhpC shield: blocks one ROS hit (20 s).'); }
+        if (dist(cx, cy, pcx, pcy) < 26) { e.alive = false; P.shield = 60 * 20; burst(cx, cy, '#7fb6ff', 14, 3); AUDIO.play('power'); toast('AhpC shield: blocks one ROS hit (20 s).'); }
         break;
       case 'tcya':
-        if (dist(cx, cy, pcx, pcy) < 26) { e.alive = false; P.magnet = 60 * 12; burst(cx, cy, '#f0c850', 14, 3); toast('TcyA: cystine is pulled towards you (12 s).'); }
+        if (dist(cx, cy, pcx, pcy) < 26) { e.alive = false; P.magnet = 60 * 12; burst(cx, cy, '#f0c850', 14, 3); AUDIO.play('power'); toast('TcyA: cystine is pulled towards you (12 s).'); }
         break;
       case 'check':
         if (!e.on && Math.abs(cx - pcx) < 20 && Math.abs(cy - pcy) < 40) {
           for (const o of L.ents) if (o.type === 'check') o.on = false;
           e.on = true; L.respawn = { x: e.x + 4, y: e.y + 4 };
           burst(cx, cy, '#bfe6ff', 14, 2.4, -0.03);
+          AUDIO.play('check');
           toast('Glycerol stock saved: you will restart here.', 140);
         }
         break;
@@ -351,6 +734,24 @@ function updateEntities() {
         }
         break;
       }
+      case 'agrb': // touch AgrB to make a fresh AIP if yours got stuck
+        if (e.cool > 0) e.cool--;
+        if (e.cool === 0 && !e.block.docked && dist(cx, cy, pcx, pcy) < 26 &&
+            (Math.abs(e.block.x - (e.x + TILE)) > 4 || Math.abs(e.block.y - e.y) > 4)) {
+          burst(e.block.x + 16, e.block.y + 16, '#c9a7f0', 10, 2);
+          resetBlock(e.block);
+          burst(e.block.x + 16, e.block.y + 16, '#c9a7f0', 12, 2);
+          AUDIO.play('power'); e.cool = 60;
+          toast('AgrB made a fresh AIP.', 100);
+        }
+        break;
+      case 'phos':
+        if (dist(cx, cy, pcx, pcy) < 26 && e.timer < PHOS_TIME - 30) {
+          if (e.timer === 0) burst(cx, cy - 10, '#b98ae6', 14, 2.6);
+          e.timer = PHOS_TIME;
+          once('phos', 'Phosphorylated: switch ON for 10 s. Go!');
+        }
+        break;
       case 'dripper':
         // Wait until the player is near, then drop pyocyanin every ~1.6 s.
         if (Math.abs(cx - pcx) < VIEW_W * 0.7 && Math.abs(cy - pcy) < VIEW_H && e.t % 100 === 0) {
@@ -359,7 +760,8 @@ function updateEntities() {
         break;
       case 'drop': {
         e.vy = Math.min(e.vy + 0.25, 8); e.y += e.vy;
-        if (tileAt(Math.floor((e.x + 4) / TILE), Math.floor((e.y + 8) / TILE)) !== ' ' || e.y > L.rows * TILE) {
+        if (tileAt(Math.floor((e.x + 4) / TILE), Math.floor((e.y + 8) / TILE)) !== ' ' || e.y > L.rows * TILE ||
+            L.solids.some(r => overlap({ x: e.x, y: e.y, w: 8, h: 10 }, r))) {
           e.alive = false;
           burst(e.x + 4, e.y + 6, '#3d86d9', 5, 1.5, 0.1, 18);
           break;
@@ -379,7 +781,10 @@ function updateEntities() {
         break;
       }
       case 'lasa': {
-        // Walk, turn at walls, ledges and foam.
+        // Patrol; charge when the player is close on the same level. Turn at walls, ledges, foam.
+        const ex = e.x + e.w / 2, ey = e.y + e.h / 2;
+        e.angry = Math.abs(pcy - ey) < 30 && Math.abs(pcx - ex) < 190 && P.inv === 0;
+        e.vx = e.angry ? (Math.sign(pcx - ex) || 1) * 2.3 : Math.sign(e.vx) * 1.1;
         const nx = e.x + e.vx;
         const front = e.vx < 0 ? nx : nx + e.w;
         const ftx = Math.floor(front / TILE), fty = Math.floor((e.y + e.h - 1) / TILE);
@@ -388,9 +793,11 @@ function updateEntities() {
         if (overlap(P, e)) {
           const prevBottom = P.y + P.h - P.vy;
           if (P.vy > 0 && prevBottom <= e.y + 8) {
-            e.alive = false; P.vy = JUMP_V * 0.7; L.points += 200;
-            burst(e.x + e.w / 2, e.y + e.h / 2, '#b8404c', 16, 3.2);
-            toast('LasA neutralised! +200', 90);
+            e.alive = false; P.vy = JUMP_V * 0.7;
+            gain(200, ex, ey, '#ff8a96');
+            burst(ex, ey, '#b8404c', 16, 3.2);
+            G.shake = 6; AUDIO.play('stomp');
+            toast('LasA neutralised!', 90);
           } else hurt('lasa', 'LasA protease cut into your cell wall.');
         }
         break;
@@ -434,34 +841,60 @@ function finishLevel() {
   const timeBonus = L.def.timeLimit ? Math.max(0, Math.round((L.def.timeLimit - L.time / 60) * 20)) : 0;
   const repBonus = P.reps * 500;
   const total = L.points + timeBonus + repBonus;
+  // Three stars: sample measured, all 3 replicates kept, at least 80 % of the cystine.
+  const stars = [true, P.reps === 3, L.cystine >= Math.ceil(L.totalCys * 0.8)];
   G.score += total;
-  G.results[G.levelIdx] = { name: L.def.name, points: L.points, timeBonus, repBonus, total, cystine: L.cystine, iron: L.ironTotal, reps: P.reps, secs: L.time / 60 };
+  G.results[G.levelIdx] = { name: L.def.name, points: L.points, timeBonus, repBonus, total, cystine: L.cystine, totalCys: L.totalCys, iron: L.ironTotal, reps: P.reps, secs: L.time / 60, stars };
   setState('levelDone');
+  AUDIO.play('done');
+}
+
+// ---- pause menu ------------------------------------------------------------------
+function menuItems() {
+  return ['Resume', 'Restart level', `Sound effects: ${AUDIO.sfxOn ? 'on' : 'off'}`, `Music: ${AUDIO.musicOn ? 'on' : 'off'}`, 'Main menu'];
+}
+function menuRects() { return menuItems().map((_, i) => ({ x: VIEW_W / 2 - 170, y: 176 + i * 52, w: 340, h: 44 })); }
+function menuSelect() {
+  AUDIO.play('click');
+  switch (G.menuIdx) {
+    case 0: setState('play'); break;
+    case 1: loadLevel(G.levelIdx); setState('intro'); break;
+    case 2: AUDIO.toggleSfx(); break;
+    case 3: AUDIO.toggleMusic(); break;
+    case 4: setState('title'); break;
+  }
 }
 
 // ---- the state machine -----------------------------------------------------------
 function update() {
+  if (took('mute')) AUDIO.toggleSfx();
+  if (took('music')) AUDIO.toggleMusic();
   switch (G.state) {
     case 'title': {
       const order = ['anc', 'stk', 'stp'];
       if (took('s1')) G.strain = 'anc';
       if (took('s2')) G.strain = 'stk';
       if (took('s3')) G.strain = 'stp';
-      if (took('left')) G.strain = order[(order.indexOf(G.strain) + 2) % 3];
-      if (took('right')) G.strain = order[(order.indexOf(G.strain) + 1) % 3];
-      if (took('ok') || took('jump')) startGame();
+      if (took('left')) { G.strain = order[(order.indexOf(G.strain) + 2) % 3]; AUDIO.play('move'); }
+      if (took('right')) { G.strain = order[(order.indexOf(G.strain) + 1) % 3]; AUDIO.play('move'); }
+      if (took('ok') || took('jump')) { AUDIO.play('click'); startGame(); }
       break;
     }
     case 'intro':
       if (took('ok') || took('jump')) setState('play');
       break;
     case 'play':
-      if (took('pause')) { setState('paused'); break; }
+      if (took('pause')) { G.menuIdx = 0; setState('paused'); AUDIO.play('click'); break; }
       updatePlay();
       break;
-    case 'paused':
-      if (took('pause') || took('ok')) setState('play');
+    case 'paused': {
+      const n = menuItems().length;
+      if (took('pause')) { setState('play'); break; }
+      if (took('up')) { G.menuIdx = (G.menuIdx + n - 1) % n; AUDIO.play('move'); }
+      if (took('down')) { G.menuIdx = (G.menuIdx + 1) % n; AUDIO.play('move'); }
+      if (took('confirm')) menuSelect();
       break;
+    }
     case 'levelDone':
       if (took('ok') || took('jump')) {
         if (G.levelIdx + 1 < LEVELS.length) { G.levelIdx++; loadLevel(G.levelIdx); setState('intro'); }
@@ -472,6 +905,7 @@ function update() {
       }
       break;
     case 'gameOver':
+      if (took('pause')) { setState('title'); break; }
       if (took('ok') || took('jump')) { G.failReason = ''; loadLevel(G.levelIdx); setState('intro'); }
       break;
     case 'win':
@@ -526,6 +960,14 @@ function buildLevelArt(b, th, seed) {
       const sh = g.createLinearGradient(0, Y + 32, 0, Y + 48);
       sh.addColorStop(0, 'rgba(0,0,0,0.18)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
       g.fillStyle = sh; g.fillRect(X, Y + 32, TILE, 16);
+      // gel dripping from overhangs
+      if (rnd() < 0.4) {
+        const dx = X + 6 + rnd() * 20, len = 4 + rnd() * 12;
+        g.strokeStyle = rgba(th.eps, 0.65); g.lineWidth = 2.5; g.lineCap = 'round';
+        g.beginPath(); g.moveTo(dx, Y + 29); g.lineTo(dx, Y + 30 + len); g.stroke();
+        g.fillStyle = rgba(th.eps, 0.85); g.beginPath(); g.arc(dx, Y + 31 + len, 2.8, 0, TAU); g.fill();
+        g.fillStyle = 'rgba(255,255,255,0.7)'; g.beginPath(); g.arc(dx - 0.9, Y + 30 + len, 0.9, 0, TAU); g.fill();
+      }
     }
     for (const side of [-1, 1]) {
       if (S(x + side, y)) continue;
@@ -546,6 +988,15 @@ function buildLevelArt(b, th, seed) {
       }
       g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 1.5;
       g.beginPath(); g.moveTo(X + 2, Y + 0.5); g.lineTo(X + TILE - 2, Y + 0.5); g.stroke();
+      // small colonies budding on the surface
+      if (rnd() < 0.2) {
+        const ox = X + 6 + rnd() * 20, col = th.cells[Math.floor(rnd() * th.cells.length)];
+        for (const [dx, dy, r] of [[-4, 0, 3.2], [4, 0, 3.2], [0, -3.5, 3.4]]) {
+          const rg = g.createRadialGradient(ox + dx - 1, Y + dy - 2, 0.3, ox + dx, Y + dy - 1, r);
+          rg.addColorStop(0, mix(col, '#ffffff', 0.65)); rg.addColorStop(1, col);
+          g.fillStyle = rg; g.beginPath(); g.arc(ox + dx, Y + dy - 1, r, 0, TAU); g.fill();
+        }
+      }
     }
   }
 
@@ -597,9 +1048,15 @@ function buildLevelArt(b, th, seed) {
     return { x: rnd() * (VIEW_W + 40), y: rnd() * (VIEW_H + 40), r: 2 + rnd() * 4, v: 0.08 + rnd() * 0.25, rot: rnd() * TAU, kind };
   });
 
+  // Out-of-focus foreground cells.
+  const fore = Array.from({ length: 12 }, () => ({
+    x: rnd() * (VIEW_W + 300), y: rnd() * (VIEW_H + 300), r: 18 + rnd() * 46,
+    a: 0.05 + rnd() * 0.08, v: 0.15 + rnd() * 0.3, col: rnd() < 0.6 ? th.far : '#ffffff',
+  }));
+
   const sky = ctx.createLinearGradient(0, 0, 0, VIEW_H);
   sky.addColorStop(0, th.sky[0]); sky.addColorStop(1, th.sky[1]);
-  return { tiles, far, dots, sky };
+  return { tiles, far, dots, fore, sky };
 }
 
 // Edge darkening, drawn once.
@@ -614,13 +1071,14 @@ const VIGNETTE = (() => {
 })();
 
 // ---- drawing helpers ---------------------------------------------------------------
-function text(str, x, y, { size = 18, color = '#222', align = 'left', weight = '600', font = 'system-ui, "Segoe UI", sans-serif' } = {}) {
+const FONT = 'system-ui, "Segoe UI", sans-serif';
+function text(str, x, y, { size = 18, color = '#222', align = 'left', weight = '600', font = FONT } = {}) {
   ctx.font = `${weight} ${size}px ${font}`;
   ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'alphabetic';
   ctx.fillText(str, x, y);
 }
 function wrap(str, maxW, size = 14) {
-  ctx.font = `600 ${size}px system-ui, "Segoe UI", sans-serif`;
+  ctx.font = `600 ${size}px ${FONT}`;
   const words = str.split(' '), lines = [];
   let line = '';
   for (const w of words) {
@@ -651,6 +1109,13 @@ function hexagon(x, y, r, rot) {
   for (let i = 0; i < 6; i++) { const a = rot + i * TAU / 6; ctx[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * r, y + Math.sin(a) * r); }
   ctx.closePath();
 }
+function star(x, y, R, filled) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? R * 0.45 : R; ctx[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * r, y + Math.sin(a) * r); }
+  ctx.closePath();
+  ctx.fillStyle = filled ? '#f3c22f' : '#e6e0d2'; ctx.fill();
+  ctx.strokeStyle = filled ? '#9a6a00' : '#bdb6a6'; ctx.lineWidth = 2.5; ctx.stroke();
+}
 
 // A golden coccus ("aureus" = golden) with a cell wall in the strain colour.
 function drawCoccus(cx, cy, r, ring, o = {}) {
@@ -661,11 +1126,22 @@ function drawCoccus(cx, cy, r, ring, o = {}) {
   circle(0, 0, r + 4, rgba(ring, 0.22));
   ball(0, 0, r, '#fff5c4', o.slow ? '#c9c35a' : '#f3c22f', o.slow ? '#7d8a2a' : '#c0860c');
   ctx.strokeStyle = ring; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.ellipse(-r * 0.4, -r * 0.5, r * 0.3, r * 0.16, -0.5, 0, TAU); ctx.fill();
   const s = r / 14;
+  // cell-wall dots that turn as the cell rolls
+  for (let i = 0; i < 8; i++) {
+    const a = (o.roll || 0) + i * TAU / 8;
+    circle(Math.cos(a) * (r - 0.5), Math.sin(a) * (r - 0.5), 1.1 * s, 'rgba(255,255,255,0.6)');
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.ellipse(-r * 0.4, -r * 0.5, r * 0.3, r * 0.16, -0.5, 0, TAU); ctx.fill();
   for (const dx of [-4.5, 4.5]) {
-    circle((dx + f * 2.5) * s, -2 * s, 3.6 * s, '#ffffff');
-    circle((dx + f * 3.6) * s, -1.6 * s, 1.8 * s, '#1d2430');
+    if (o.blink) {
+      ctx.strokeStyle = '#1d2430'; ctx.lineWidth = 1.6 * s; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo((dx + f * 2.5 - 2.6) * s, -1.6 * s); ctx.lineTo((dx + f * 2.5 + 2.6) * s, -1.6 * s); ctx.stroke();
+    } else {
+      circle((dx + f * 2.5) * s, -2 * s, 3.6 * s, '#ffffff');
+      circle((dx + f * 3.6) * s, -1.6 * s, 1.8 * s, '#1d2430');
+      circle((dx + f * 3.6 - 0.7) * s, -2.4 * s, 0.6 * s, '#ffffff');
+    }
   }
   circle((-7.5 + f * 2) * s, 4 * s, 2.4 * s, 'rgba(235,110,80,0.35)');
   circle((7.5 + f * 2) * s, 4 * s, 2.4 * s, 'rgba(235,110,80,0.35)');
@@ -685,10 +1161,18 @@ function drawIronIcon(x, y, s = 1) {
   ball(x, y, 9 * s, '#ffc29a', '#c65a2c', '#7a2e12');
   if (s >= 0.9) text('Fe', x, y + 4 * s, { size: 10 * s, color: '#fff', align: 'center', weight: '800' });
 }
+// AIP: a cyclic (thiolactone) peptide ring of 5 residues with a short tail.
+function drawAipIcon(x, y, s = 1) {
+  for (let i = 0; i < 3; i++) ball(x - 7 * s - i * 4.5 * s, y + 6 * s + i * 2.5 * s, 2.8 * s, '#f3e6ff', '#a274d6', '#5b2a8a');
+  for (let i = 0; i < 5; i++) {
+    const a = -Math.PI / 2 + i * TAU / 5;
+    ball(x + 2 * s + Math.cos(a) * 6.5 * s, y - 1 * s + Math.sin(a) * 6.5 * s, 3.3 * s, '#f6ecff', '#9b59d0', '#5b2a8a');
+  }
+}
 
 // ---- world drawing ---------------------------------------------------------------
 function drawBackground(th, cx, cy) {
-  ctx.fillStyle = L.art.sky; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.fillStyle = L.art.sky; ctx.fillRect(-12, -12, VIEW_W + 24, VIEW_H + 24);
   // Light falling into the culture.
   ctx.fillStyle = 'rgba(255,255,255,0.07)';
   for (let i = 0; i < 4; i++) {
@@ -709,11 +1193,47 @@ function drawBackground(th, cx, cy) {
   }
 }
 
-function drawFoam(cx, cy) {
+// The y of the first surface at or below (px, py), up to 9 rows down, or null.
+function surfaceBelow(px, py) {
+  const tx = Math.floor(px / TILE), r0 = Math.floor(py / TILE);
+  for (let ty = r0; ty < Math.min(L.rows, r0 + 9); ty++) {
+    const c = tileAt(tx, ty);
+    if (c === '#' || oneWay(c)) return ty * TILE;
+  }
+  return null;
+}
+
+// Out-of-focus cells drifting in front of the scene (depth of field).
+function drawForeground(cx, cy) {
+  const W = VIEW_W + 300, H = VIEW_H + 300;
+  for (const f of L.art.fore) {
+    f.y -= f.v;
+    const x = ((f.x - cx * 1.35) % W + W) % W - 150, y = ((f.y - cy * 1.35) % H + H) % H - 150;
+    const g = ctx.createRadialGradient(x, y, f.r * 0.2, x, y, f.r);
+    g.addColorStop(0, rgba(f.col, f.a * 0.5)); g.addColorStop(0.85, rgba(f.col, f.a)); g.addColorStop(1, rgba(f.col, 0));
+    circle(x, y, f.r, g);
+  }
+}
+
+// PASN levels are murkier: darker towards the edges, lit around the player.
+function drawDarkness(cx, cy) {
+  const d = L.def.theme.dark || 0;
+  if (!d) return;
+  const px = P.x + P.w / 2 - cx, py = P.y + P.h / 2 - cy;
+  const g = ctx.createRadialGradient(px, py, 110, px, py, 520);
+  g.addColorStop(0, 'rgba(4,16,24,0)'); g.addColorStop(1, `rgba(4,16,24,${d})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+}
+
+function visibleTiles(cx, cy, fn) {
   const c0 = Math.max(0, Math.floor(cx / TILE)), c1 = Math.min(L.cols - 1, Math.floor((cx + VIEW_W) / TILE));
   const r0 = Math.max(0, Math.floor(cy / TILE)), r1 = Math.min(L.rows - 1, Math.floor((cy + VIEW_H) / TILE));
-  for (let ty = r0; ty <= r1; ty++) for (let tx = c0; tx <= c1; tx++) {
-    if (L.grid[ty][tx] !== '^') continue;
+  for (let ty = r0; ty <= r1; ty++) for (let tx = c0; tx <= c1; tx++) fn(L.grid[ty][tx], tx, ty);
+}
+
+function drawFoam(cx, cy) {
+  visibleTiles(cx, cy, (c, tx, ty) => {
+    if (c !== '^') return;
     const X = tx * TILE, Y = ty * TILE, t = L.time;
     glow(X + 16, Y + 26, 22, '#e0458f', 0.25);
     roundRect(X + 1, Y + 24, TILE - 2, 8, 4, 'rgba(214,70,143,0.55)');
@@ -721,23 +1241,51 @@ function drawFoam(cx, cy) {
       const hi = (k + tx) % 2, r = 6.5 - hi * 1.5;
       const bx = X + 6 + k * 10, by = Y + 23 - hi * 5 + Math.sin(t * 0.08 + k * 2 + tx) * 1.5;
       ball(bx, by, r, '#ffe0ef', '#e86aa9', '#9c2763');
-      ctx.fillStyle = '#7d1b4f';
       for (let j = 0; j < 8; j++) { const a = j * TAU / 8 + t * 0.02; circle(bx + Math.cos(a) * r, by + Math.sin(a) * r, 1.2, '#7d1b4f'); }
     }
     const rise = (t * 0.6 + tx * 13) % 24;
     ctx.strokeStyle = `rgba(232,106,169,${0.7 - rise / 34})`; ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.arc(X + 10 + (tx % 3) * 6, Y + 18 - rise, 2.2, 0, TAU); ctx.stroke();
-  }
+  });
 }
 
-// Info signs are membrane vesicles with an "i" inside.
-function signNear(s) { return Math.abs(s.tx * TILE + 16 - (P.x + P.w / 2)) < TILE * 5 && Math.abs(s.ty * TILE + 16 - (P.y + P.h / 2)) < TILE * 4; }
+// Lysed cells: pale, cracked cocci that shake and collapse.
+function drawLysis(cx, cy) {
+  visibleTiles(cx, cy, (c, tx, ty) => {
+    if (c !== '%') return;
+    const X = tx * TILE, Y = ty * TILE, s = L.lysis.get(ty * L.cols + tx);
+    if (s && s.down > 0) {
+      ctx.globalAlpha = s.down < 50 ? (50 - s.down) / 50 * 0.5 : 0.1;
+      for (let k = 0; k < 3; k++) { ctx.strokeStyle = '#efe4bf'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(X + 6 + k * 10, Y + 6, 5, 0, TAU); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+      return;
+    }
+    const sh = s ? Math.sin(s.t * 1.9) * Math.min(2.5, s.t / 8) : 0;
+    roundRect(X + 1 + sh, Y + 2, 30, 10, 5, 'rgba(110,90,50,0.25)');
+    for (let k = 0; k < 3; k++) {
+      const bx = X + 6 + k * 10 + sh;
+      ball(bx, Y + 6, 5.6, '#fffdf0', '#e8dcae', '#a39463');
+      ctx.strokeStyle = 'rgba(90,70,30,0.65)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(bx - 1, Y + 2); ctx.lineTo(bx + 1.5, Y + 5.5); ctx.lineTo(bx - 0.5, Y + 9); ctx.stroke();
+    }
+  });
+}
+
+// Info signs are membrane vesicles with an "i" inside. Only the nearest one talks.
+function nearestSign() {
+  let best = null, bd = Infinity;
+  for (const s of L.signs) {
+    const dx = Math.abs(s.tx * TILE + 16 - (P.x + P.w / 2)), dy = Math.abs(s.ty * TILE + 16 - (P.y + P.h / 2));
+    if (dx < TILE * 5 && dy < TILE * 4 && dx + dy < bd) { bd = dx + dy; best = s; }
+  }
+  return best;
+}
 function drawSigns(cx, cy) {
+  const near = nearestSign();
   for (const s of L.signs) {
     const x = s.tx * TILE + 16, y = s.ty * TILE + 12 + Math.sin(L.time * 0.05 + s.tx) * 3;
     if (x < cx - 40 || x > cx + VIEW_W + 40 || y < cy - 40 || y > cy + VIEW_H + 40) continue;
-    const near = signNear(s);
-    if (near) glow(x, y, 30, '#ffffff', 0.5);
+    if (s === near) glow(x, y, 30, '#ffffff', 0.5);
     circle(x, y, 13, 'rgba(255,255,255,0.55)');
     ctx.strokeStyle = 'rgba(90,120,150,0.9)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, 13, 0, TAU); ctx.stroke();
     ctx.strokeStyle = 'rgba(90,120,150,0.5)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 9.5, 0, TAU); ctx.stroke();
@@ -745,33 +1293,37 @@ function drawSigns(cx, cy) {
   }
 }
 function drawSignText(cx, cy) {
-  for (const s of L.signs) {
-    if (!signNear(s)) continue;
-    const x = s.tx * TILE + 16 - cx, y = s.ty * TILE + 12 - cy;
-    const lines = wrap(s.text, 300);
-    const h = lines.length * 18 + 16, w = 324;
-    const bx = clamp(x - w / 2, 8, VIEW_W - w - 8);
-    let by = y - 28 - h;
-    if (by < 58) by = y + 26;
-    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 3;
-    roundRect(bx, by, w, h, 10, 'rgba(255,255,255,0.95)');
-    ctx.restore();
-    roundRect(bx, by, w, h, 10, null, 'rgba(90,120,150,0.8)', 1.5);
-    lines.forEach((ln, i) => text(ln, bx + 12, by + 23 + i * 18, { size: 14, color: '#22303c' }));
-  }
+  const s = nearestSign();
+  if (!s) return;
+  const x = s.tx * TILE + 16 - cx, y = s.ty * TILE + 12 - cy;
+  const lines = wrap(s.text, 300);
+  const h = lines.length * 18 + 16, w = 324;
+  const bx = clamp(x - w / 2, 8, VIEW_W - w - 8);
+  let by = y - 28 - h;
+  if (by < 58) by = y + 26;
+  roundRect(bx, by, w, h, 10, 'rgba(255,255,255,0.72)', 'rgba(90,120,150,0.7)', 1.5);
+  lines.forEach((ln, i) => text(ln, bx + 12, by + 23 + i * 18, { size: 14, color: '#1a2833' }));
 }
 
 function drawEntities(cx, cy) {
   for (const e of L.ents) {
     if (!e.alive || e.type === 'start') continue;
     const x = e.x, y = e.y;
-    if (x < cx - 140 || x > cx + VIEW_W + 140 || y < cy - 140 || y > cy + VIEW_H + 140) continue;
+    if (e.type !== 'shuttle' && e.type !== 'gate' && (x < cx - 140 || x > cx + VIEW_W + 140 || y < cy - 140 || y > cy + VIEW_H + 140)) continue;
     const bob = Math.sin((e.t + e.tx * 13) * 0.08) * 3;
     switch (e.type) {
-      case 'cystine': // two S atoms bonded: S–S
+      case 'cystine': { // two S atoms bonded: S–S, with an occasional twinkle
         glow(x + 16, y + 16 + bob, 20, '#ffd84a', 0.35);
         drawCystineIcon(x + 16, y + 16, 1, bob);
+        const tw = (e.t + e.tx * 17) % 100;
+        if (tw < 16) {
+          const k = Math.sin(tw / 16 * Math.PI) * 6, sx = x + 25, sy = y + 8 + bob;
+          ctx.fillStyle = 'rgba(255,255,255,0.95)';
+          ctx.beginPath(); ctx.ellipse(sx, sy, k, k * 0.18, 0, 0, TAU); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(sx, sy, k * 0.18, k, 0, 0, TAU); ctx.fill();
+        }
         break;
+      }
       case 'iron':
         glow(x + 16, y + 16 + bob, 20, '#ff8a4a', 0.35);
         drawIronIcon(x + 16, y + 16 + bob);
@@ -820,15 +1372,12 @@ function drawEntities(cx, cy) {
         roundRect(X, Y, w, h, 8, g);
         ctx.restore();
         roundRect(X, Y, w, h, 8, null, '#69717c', 2);
-        // LC column on the left
         roundRect(X + 6, Y + 8, 8, 58, 3, '#dfe6ee', '#7d8794', 1.2);
         roundRect(X + 7.5, Y + 12 + (e.t * 0.6) % 44, 5, 8, 2, '#5aa0ff');
-        // screen with a spectrum
         roundRect(X + 20, Y + 8, 50, 32, 4, '#15202c');
         ctx.strokeStyle = '#4fe3a1'; ctx.lineWidth = 2; ctx.beginPath();
         for (let i = 0; i < 9; i++) { const px = X + 25 + i * 5; ctx.moveTo(px, Y + 36); ctx.lineTo(px, Y + 36 - 3 - ((i * 7 + e.t / 6) % 20)); }
         ctx.stroke();
-        // sample inlet + LED
         roundRect(X + 24, Y + 48, 42, 12, 4, '#59626e');
         circle(X + 45, Y + 54, 3.5, '#1c232c');
         circle(X + 64, Y + 68, 3, Math.floor(e.t / 30) % 2 ? '#2ee07a' : '#1b7f3b');
@@ -864,8 +1413,10 @@ function drawEntities(cx, cy) {
         text('HQNO', X, Y + 5, { size: 12, color: '#355a1a', align: 'center', weight: '800' });
         break;
       }
-      case 'lasa': { // a protease with snapping jaws
-        const X = x + e.w / 2, Y = y + e.h / 2 + 1, dir = e.vx < 0 ? -1 : 1, open = Math.abs(Math.sin(e.t * 0.2)) * 0.5;
+      case 'lasa': { // a protease with snapping jaws; glows red when it charges
+        const X = x + e.w / 2, Y = y + e.h / 2 + 1, dir = e.vx < 0 ? -1 : 1, open = Math.abs(Math.sin(e.t * (e.angry ? 0.4 : 0.2))) * 0.5;
+        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(X, y + e.h + 1, 13, 3.5, 0, 0, TAU); ctx.fill();
+        if (e.angry) glow(X, Y, 24, '#ff3040', 0.4);
         ball(X, Y, 12, '#f08a96', '#b23a48', '#5e1520');
         ctx.fillStyle = '#e9e2e4';
         for (const sgn of [-1, 1]) {
@@ -874,7 +1425,7 @@ function drawEntities(cx, cy) {
           ctx.restore();
         }
         circle(X + dir * 3, Y - 4, 3, '#fff'); circle(X + dir * 4, Y - 3.5, 1.5, '#1d1d1d');
-        ctx.strokeStyle = '#3a0c14'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(X + dir * 0, Y - 9); ctx.lineTo(X + dir * 6, Y - 7); ctx.stroke();
+        ctx.strokeStyle = '#3a0c14'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(X, Y - 9 + (e.angry ? 1 : 0)); ctx.lineTo(X + dir * 6, Y - 7 - (e.angry ? 1 : 0)); ctx.stroke();
         text('LasA', X - dir * 2, Y + 8, { size: 8, color: '#fff', align: 'center', weight: '800' });
         break;
       }
@@ -886,7 +1437,102 @@ function drawEntities(cx, cy) {
         ball(X, Y, 5, '#f6ffd0', '#c8e85a', '#6f8f10');
         break;
       }
+      case 'vent': { // an air stone; bubbles come out of it
+        roundRect(x + 5, y + 23, 22, 9, 4, '#8d969c', '#5f676d', 1.2);
+        for (let k = 0; k < 4; k++) circle(x + 9 + k * 5, y + 27, 1.1, '#4f565b');
+        for (let k = 0; k < 3; k++) { const yy = y + 20 - ((e.t * 0.8 + k * 9) % 26); circle(x + 10 + k * 6 + Math.sin(e.t * 0.1 + k) * 1.5, yy, 1.8, 'rgba(255,255,255,0.75)'); }
+        break;
+      }
+      case 'agrb': { // AgrB in a patch of membrane: it makes the AIP
+        for (let i = 0; i < 6; i++) { circle(x + 2 + i * 5.6, y + 29, 2.3, '#c9b8e6'); circle(x + 2 + i * 5.6, y + 23, 2.3, '#c9b8e6'); }
+        ctx.strokeStyle = 'rgba(150,120,190,0.6)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y + 26); ctx.lineTo(x + 32, y + 26); ctx.stroke();
+        const g = ctx.createLinearGradient(x, y + 4, x + 24, y + 30);
+        g.addColorStop(0, '#b79ce0'); g.addColorStop(1, '#5b3a99');
+        roundRect(x + 6, y + 3, 20, 28, 9, g, '#3d2a63', 1.5);
+        text('AgrB', x + 16, y + 19, { size: 8, color: '#fff', align: 'center', weight: '800' });
+        if (!e.block.docked && (Math.abs(e.block.x - (e.x + TILE)) > 4 || Math.abs(e.block.y - e.y) > 4)) {
+          ctx.globalAlpha = 0.5 + 0.5 * Math.sin(e.t * 0.12);
+          text('↻', x + 16, y - 4, { size: 16, color: '#7a4fc9', align: 'center', weight: '900' });
+          ctx.globalAlpha = 1;
+        }
+        break;
+      }
+      case 'agrc': { // AgrC receptor: a pocket in the floor that binds the AIP
+        const on = e.on;
+        if (on) glow(x + 16, y + 16, 34, '#6fe08a', 0.5);
+        ctx.fillStyle = on ? 'rgba(80,200,120,0.3)' : 'rgba(30,10,50,0.35)'; ctx.fillRect(x + 2, y, 28, 32);
+        ctx.strokeStyle = on ? '#2e9b52' : '#8b5fd6'; ctx.lineWidth = 4; ctx.lineJoin = 'round';
+        ctx.beginPath(); ctx.moveTo(x + 3, y + 1); ctx.lineTo(x + 3, y + 26); ctx.quadraticCurveTo(x + 3, y + 30, x + 8, y + 30); ctx.lineTo(x + 24, y + 30); ctx.quadraticCurveTo(x + 29, y + 30, x + 29, y + 26); ctx.lineTo(x + 29, y + 1); ctx.stroke();
+        if (!on) {
+          text('AgrC', x + 16, y + 22, { size: 8, color: '#e6d8ff', align: 'center', weight: '800' });
+          ctx.globalAlpha = 0.45 + 0.45 * Math.sin(e.t * 0.1);
+          text('▼', x + 16, y - 6 + Math.sin(e.t * 0.1) * 3, { size: 13, color: '#8b5fd6', align: 'center', weight: '900' });
+          ctx.globalAlpha = 1;
+        }
+        break;
+      }
+      case 'phos': { // phospho-switch: a protein that carries a P while ON
+        const X = x + 16, Y = y + 16, on = e.timer > 0;
+        roundRect(x + 9, y + 26, 14, 6, 2, '#4d5a5f');
+        if (on) glow(X, Y, 28, '#b98ae6', 0.45);
+        ball(X, Y, 11, '#d8f5f1', on ? '#3aa39a' : '#7f9a97', on ? '#1d5f59' : '#455654');
+        if (on) {
+          ctx.strokeStyle = '#b98ae6'; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(X, Y, 16, -Math.PI / 2, -Math.PI / 2 + TAU * e.timer / PHOS_TIME); ctx.stroke();
+          circle(X + 9, Y - 10, 7, '#7b3fb5');
+          text('P', X + 9, Y - 6, { size: 10, color: '#fff', align: 'center', weight: '900' });
+        } else {
+          ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = 'rgba(123,63,181,0.8)'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(X + 9, Y - 10, 6, 0, TAU); ctx.stroke(); ctx.restore();
+          ctx.globalAlpha = 0.5 + 0.5 * Math.sin(e.t * 0.12);
+          text('P', X + 9, Y - 6, { size: 10, color: '#7b3fb5', align: 'center', weight: '900' });
+          ctx.globalAlpha = 1;
+        }
+        break;
+      }
+      case 'gate': { // a closed barrier of protein subunits; slides up when its signal is ON
+        const H = e.h * TILE, vis = H * (1 - e.open), X = x + 4;
+        if (vis > 1) {
+          ctx.save(); ctx.beginPath(); ctx.rect(X - 2, y, 28, vis); ctx.clip();
+          const g = ctx.createLinearGradient(X, 0, X + 24, 0);
+          g.addColorStop(0, '#4a2d80'); g.addColorStop(0.5, '#9b74e0'); g.addColorStop(1, '#4a2d80');
+          roundRect(X, y + vis - H, 24, H, 8, g);
+          for (let k = 0; k < e.h * 2; k++) { ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.beginPath(); ctx.ellipse(X + 12, y + vis - H + 8 + k * 16, 8, 5, 0, 0, TAU); ctx.fill(); }
+          ctx.restore();
+          const by = y + vis - 16;
+          circle(X + 12, by, 9, '#ffffff');
+          if (e.src === 'phos') text('P', X + 12, by + 4, { size: 11, color: '#7b3fb5', align: 'center', weight: '900' });
+          else drawAipIcon(X + 12, by, 0.5);
+        }
+        roundRect(X - 4, y - 4, 32, 6, 3, '#3d2a63');
+        break;
+      }
+      case 'shuttle': { // moving bridge: a chain of protein beads that runs while its signal is ON
+        const on = !e.ch || L.chan[e.ch];
+        ctx.save(); ctx.setLineDash([4, 8]); ctx.strokeStyle = on ? 'rgba(58,163,154,0.45)' : 'rgba(80,90,95,0.3)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(e.x0 + 4, e.y0 + 6); ctx.lineTo(e.x1 + e.len * TILE - 4, e.y1 + 6); ctx.stroke(); ctx.restore();
+        const X0 = e.px, X1 = e.px + e.len * TILE;
+        if (on) glow((X0 + X1) / 2, e.py + 6, 50, '#4cc3b6', 0.25);
+        roundRect(X0 + 1, e.py + 1, X1 - X0 - 2, 11, 5, on ? 'rgba(29,111,104,0.85)' : 'rgba(80,90,95,0.85)');
+        for (let px = X0 + 8; px < X1 - 4; px += 10) ball(px, e.py + 6, 4.5, '#e6fffb', on ? '#4cc3b6' : '#9aa6a9', on ? '#1d6f68' : '#5a6466');
+        if (on && e.wait === 0) text(e.dir > 0 ? '›' : '‹', (X0 + X1) / 2, e.py - 3, { size: 16, color: '#1d6f68', align: 'center', weight: '900' });
+        break;
+      }
     }
+  }
+  for (const b of L.blocks) { // AIP blocks
+    if (b.docked) glow(b.x + 16, b.y + 16, 30, '#6fe08a', 0.45);
+    roundRect(b.x + 1, b.y + 1, 30, 30, 7, b.docked ? 'rgba(205,245,215,0.95)' : 'rgba(238,228,252,0.95)', b.docked ? '#2e9b52' : '#7a4fc9', 2);
+    drawAipIcon(b.x + 15, b.y + 13, 0.95);
+    text('AIP', b.x + 16, b.y + 29, { size: 7, color: b.docked ? '#1e6b38' : '#5b2a8a', align: 'center', weight: '900' });
+  }
+  for (const b of L.movers) { // air bubbles
+    const s = Math.min(1, b.t / 12), r = b.r * s, X = b.x + Math.sin(b.t * 0.06) * 2, Y = b.y;
+    const g = ctx.createRadialGradient(X - r * 0.3, Y - r * 0.35, r * 0.1, X, Y, r);
+    g.addColorStop(0, 'rgba(255,255,255,0.5)'); g.addColorStop(0.7, 'rgba(200,235,255,0.12)'); g.addColorStop(1, 'rgba(255,255,255,0.45)');
+    circle(X, Y, r, g);
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(X, Y, r, 0, TAU); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.beginPath(); ctx.ellipse(X - r * 0.4, Y - r * 0.45, r * 0.22, r * 0.12, -0.6, 0, TAU); ctx.fill();
   }
 }
 
@@ -896,18 +1542,32 @@ function drawFx() {
     circle(p.x, p.y, p.r, p.color);
   }
   ctx.globalAlpha = 1;
+  ctx.font = `900 15px ${FONT}`; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+  for (const p of L.pops) {
+    ctx.globalAlpha = Math.min(1, p.life / 20);
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(20,20,30,0.6)'; ctx.strokeText(p.text, p.x, p.y);
+    ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y);
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawPlayer() {
   if (P.inv > 0 && Math.floor(P.inv / 5) % 2 === 0) return;  // blink after a hit
   const S = STRAINS[G.strain];
   const cx = P.x + P.w / 2, cy = P.y + P.h / 2;
+  // soft shadow on the surface below, smaller and fainter the higher you are
+  const sy = surfaceBelow(cx, P.y + P.h);
+  if (sy !== null) {
+    const k = Math.max(0, 1 - (sy - P.y - P.h) / 240);
+    ctx.fillStyle = `rgba(0,0,0,${0.3 * k})`;
+    ctx.beginPath(); ctx.ellipse(cx, sy + 1, 13 * (0.45 + 0.55 * k), 3.6 * (0.45 + 0.55 * k), 0, 0, TAU); ctx.fill();
+  }
   if (P.magnet > 0) {
     ctx.save(); ctx.setLineDash([5, 6]); ctx.lineDashOffset = -L.time * 0.6;
     ctx.strokeStyle = 'rgba(230,180,40,0.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 26, 0, TAU); ctx.stroke();
     ctx.restore();
   }
-  drawCoccus(cx, cy, 14, S.colour, { face: P.face, slow: P.slow > 0, squash: P.squash });
+  drawCoccus(cx, cy, 14, S.colour, { face: P.face, slow: P.slow > 0, squash: P.squash, roll: P.roll, blink: L.time % 240 < 8 });
   if (P.shield > 0) {
     circle(cx, cy, 22, 'rgba(90,160,255,0.16)');
     ctx.strokeStyle = 'rgba(110,175,255,0.85)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 22, 0, TAU); ctx.stroke();
@@ -939,35 +1599,38 @@ function drawHUD() {
   text(`score ${G.score + L.points}`, 476, 34, { size: 15, color: W, weight: '700' });
   let x = 600;
   const chip = (label, col) => {
-    ctx.font = '800 12px system-ui, "Segoe UI", sans-serif';
+    ctx.font = `800 12px ${FONT}`;
     const w = ctx.measureText(label).width + 16;
     roundRect(x, 17, w, 22, 11, col); text(label, x + w / 2, 32, { size: 12, color: '#fff', align: 'center', weight: '800' });
     x += w + 6;
   };
+  if (L.comboT > 0 && L.combo > 1) chip(`combo x${Math.min(L.combo, 5)}`, '#c2410c');
   if (P.shield > 0) chip('AhpC', '#3a7bd5');
   if (P.magnet > 0) chip(`TcyA ${Math.ceil(P.magnet / 60)}`, '#b38600');
   if (P.slow > 0) chip('HQNO', '#4f7f2a');
   if (L.def.timeLimit) {
-    // Game seconds left × 12 = pulse seconds left (75 game s = 15 min).
-    const left = Math.max(0, L.def.timeLimit - L.time / 60) * 12;
+    // Game seconds left, scaled so the whole limit shows as 15 pulse minutes.
+    const left = Math.max(0, L.def.timeLimit - L.time / 60) * PULSE_S / L.def.timeLimit;
     const mm = Math.floor(left / 60), ss = Math.floor(left % 60), urgent = left < 120;
     roundRect(VIEW_W - 152, 14, 132, 28, 14, urgent ? '#b3261e' : 'rgba(255,255,255,0.12)');
     ctx.strokeStyle = urgent ? '#fff' : '#7fc4ff'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(VIEW_W - 134, 28, 8, -Math.PI / 2, -Math.PI / 2 + TAU * left / 900); ctx.stroke();
+    ctx.beginPath(); ctx.arc(VIEW_W - 134, 28, 8, -Math.PI / 2, -Math.PI / 2 + TAU * left / PULSE_S); ctx.stroke();
     text(`pulse ${mm}:${String(ss).padStart(2, '0')}`, VIEW_W - 30, 34, { size: 15, color: '#fff', align: 'right', weight: '800' });
   }
   if (G.toastT > 0 && G.toast) {
     const lines = wrap(G.toast, 560, 16);
     const h = lines.length * 22 + 16;
     ctx.globalAlpha = Math.min(1, G.toastT / 30);
-    roundRect(VIEW_W / 2 - 300, 58, 600, h, 12, 'rgba(14,26,36,0.88)');
-    roundRect(VIEW_W / 2 - 300, 58, 6, h, [12, 0, 0, 12], S.colour);
+    roundRect(VIEW_W / 2 - 300, 58, 600, h, 12, 'rgba(14,26,36,0.5)');
+    roundRect(VIEW_W / 2 - 300, 58, 5, h, [12, 0, 0, 12], rgba(S.colour, 0.8));
+    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 4;
     lines.forEach((ln, i) => text(ln, VIEW_W / 2 + 3, 81 + i * 22, { size: 16, color: '#fff', align: 'center' }));
+    ctx.restore();
     ctx.globalAlpha = 1;
   }
 }
 
-function panel(title, sub, lines, footer, accent = '#2b5d8a') {
+function panel({ title, sub = '', lines = [], footer = '', accent = '#2b5d8a', bodyY = 196 }) {
   ctx.fillStyle = 'rgba(8,20,28,0.62)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 30; ctx.shadowOffsetY = 8;
   roundRect(130, 60, 700, 420, 18, '#fbf8f1');
@@ -978,12 +1641,39 @@ function panel(title, sub, lines, footer, accent = '#2b5d8a') {
   ctx.globalAlpha = 1;
   text(title, VIEW_W / 2, 108, { size: 32, color: '#fff', align: 'center', weight: '800' });
   if (sub) text(sub, VIEW_W / 2, 136, { size: 16, color: 'rgba(255,255,255,0.88)', align: 'center' });
-  lines.forEach((ln, i) => text(ln, VIEW_W / 2, 196 + i * 28, { size: 17, color: '#2b2b2b', align: 'center', weight: '500' }));
+  lines.forEach((ln, i) => text(ln, VIEW_W / 2, bodyY + i * 28, { size: 17, color: '#2b2b2b', align: 'center', weight: '500' }));
   if (footer) {
     ctx.globalAlpha = 0.55 + 0.45 * Math.sin(performance.now() / 260);
     text(footer, VIEW_W / 2, 455, { size: 16, color: accent, align: 'center', weight: '700' });
     ctx.globalAlpha = 1;
   }
+}
+
+function drawStars(stars, y) {
+  const labels = ['sample measured', 'all 3 replicates', '≥ 80 % cystine'];
+  stars.forEach((on, i) => {
+    const x = VIEW_W / 2 + (i - 1) * 150;
+    if (on) glow(x, y, 34, '#f3c22f', 0.35);
+    star(x, y, 22, on);
+    text(labels[i], x, y + 42, { size: 13, color: on ? '#5a4500' : '#9a9384', align: 'center', weight: '700' });
+  });
+}
+
+function drawPauseMenu() {
+  ctx.fillStyle = 'rgba(8,20,28,0.6)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 30; ctx.shadowOffsetY = 8;
+  roundRect(VIEW_W / 2 - 210, 66, 420, 420, 18, 'rgba(251,248,241,0.96)');
+  ctx.restore();
+  roundRect(VIEW_W / 2 - 210, 66, 420, 84, [18, 18, 0, 0], '#2b5d8a');
+  drawCoccus(VIEW_W / 2 - 150, 108, 15, STRAINS[G.strain].colour, { face: 1 });
+  text('Paused', VIEW_W / 2 + 10, 116, { size: 32, color: '#fff', align: 'center', weight: '800' });
+  menuRects().forEach((r, i) => {
+    const sel = i === G.menuIdx, label = menuItems()[i];
+    roundRect(r.x, r.y, r.w, r.h, 12, sel ? '#2b5d8a' : 'rgba(43,93,138,0.08)', sel ? null : 'rgba(43,93,138,0.25)', 1.5);
+    text(label, r.x + r.w / 2, r.y + 29, { size: 18, color: sel ? '#fff' : '#22303c', align: 'center', weight: sel ? '800' : '600' });
+    if (sel) text('▶', r.x + 18, r.y + 29, { size: 14, color: '#fff', weight: '900' });
+  });
+  text('↑ ↓ choose · Enter / Space select · P resume', VIEW_W / 2, 466, { size: 13, color: '#6b6455', align: 'center' });
 }
 
 function strainCards() {
@@ -1013,7 +1703,7 @@ function drawTitle() {
   ctx.fillStyle = g; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.drawImage(TITLE_BG, (t * 12) % VIEW_W, 0, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
   ctx.save();
-  ctx.font = '900 64px system-ui, "Segoe UI", sans-serif'; ctx.textAlign = 'center';
+  ctx.font = `900 64px ${FONT}`; ctx.textAlign = 'center';
   ctx.lineJoin = 'round'; ctx.lineWidth = 10; ctx.strokeStyle = '#5a3d00'; ctx.strokeText('JE2 JUMP', VIEW_W / 2, 92);
   const tg = ctx.createLinearGradient(0, 40, 0, 96);
   tg.addColorStop(0, '#fff1a0'); tg.addColorStop(1, '#e0a210');
@@ -1037,9 +1727,10 @@ function drawTitle() {
     S.lines.forEach((ln, i) => text(ln, c.x + 16, c.y + 104 + lift + i * 22, { size: 13, color: '#2b2b2b', weight: '500' }));
   }
   ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 4);
-  text(`Press Enter / Space to start${G.best ? '   ·   best score ' + G.best : ''}`, VIEW_W / 2, 480, { size: 17, color: '#10202b', align: 'center', weight: '800' });
+  text(`Press Enter / Space to start${G.best ? '   ·   best score ' + G.best : ''}`, VIEW_W / 2, 476, { size: 17, color: '#10202b', align: 'center', weight: '800' });
   ctx.globalAlpha = 1;
-  text('PASN = cell-free spent medium of P. aeruginosa PAO1 (no living Pseudomonas).', VIEW_W / 2, 516, { size: 13, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '500' });
+  text(`M sound ${AUDIO.sfxOn ? 'on' : 'off'} · N music ${AUDIO.musicOn ? 'on' : 'off'} · P pause menu`, VIEW_W / 2, 500, { size: 13, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '600' });
+  text('PASN = cell-free spent medium of P. aeruginosa PAO1 (no living Pseudomonas).', VIEW_W / 2, 524, { size: 13, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '500' });
 }
 
 function drawVignette() { ctx.drawImage(VIGNETTE, 0, 0); }
@@ -1047,18 +1738,23 @@ function drawVignette() { ctx.drawImage(VIGNETTE, 0, 0); }
 function drawWorld() {
   const th = L.def.theme;
   const cx = Math.round(L.cam), cy = Math.round(L.camY);
+  const sx = G.shake ? (Math.random() - 0.5) * G.shake : 0, sy = G.shake ? (Math.random() - 0.5) * G.shake : 0;
+  ctx.save();
+  ctx.translate(sx, sy);
   drawBackground(th, cx, cy);
   ctx.drawImage(L.art.tiles, cx, cy, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
-  ctx.save();
   ctx.translate(-cx, -cy);
   drawFoam(cx, cy);
+  drawLysis(cx, cy);
   drawSigns(cx, cy);
   drawEntities(cx, cy);
   drawPlayer();
   drawFx();
   ctx.restore();
-  drawSignText(cx, cy);
+  drawForeground(cx, cy);
+  drawDarkness(cx, cy);
   drawVignette();
+  drawSignText(cx, cy);
   drawHUD();
 }
 
@@ -1069,28 +1765,34 @@ function draw() {
   const S = STRAINS[G.strain];
   switch (G.state) {
     case 'intro':
-      panel(`Level ${G.levelIdx + 1}: ${L.def.name}`, L.def.subtitle, L.def.intro.concat(['', `Playing as ${S.label} (${S.title})`]), 'Press Enter / Space / tap to start', L.def.theme.accent);
+      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat(['', `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent });
       break;
     case 'paused':
-      panel('Paused', '', ['Press P or Enter to continue.'], '');
+      drawPauseMenu();
       break;
     case 'levelDone': {
       const r = G.results[G.levelIdx];
-      const stats = `S–S ${r.cystine} · Fe ${r.iron} · replicates ${r.reps}/3 · ${r.secs.toFixed(0)} s   →   +${r.total} points`;
-      panel(`${L.def.name}: sample measured!`, stats, LEVEL_FACTS[G.levelIdx], 'Press Enter to continue', '#1b7f3b');
+      const stats = `S–S ${r.cystine}/${r.totalCys} · Fe ${r.iron} · replicates ${r.reps}/3 · ${r.secs.toFixed(0)} s   →   +${r.total} points`;
+      panel({ title: `${L.def.name}: sample measured!`, sub: stats, lines: LEVEL_FACTS[G.levelIdx], footer: 'Press Enter to continue', accent: '#1b7f3b', bodyY: 316 });
+      drawStars(r.stars, 206);
       break;
     }
     case 'gameOver':
-      panel(G.failReason === 'pulse' ? 'Pulse over' : 'n = 0', G.failReason === 'pulse' ? 'Your sample missed the 15-min time point.' : 'No replicates left.',
-        G.failReason === 'pulse'
+      panel({
+        title: G.failReason === 'pulse' ? 'Pulse over' : 'n = 0',
+        sub: G.failReason === 'pulse' ? 'Your sample missed the 15-min time point.' : 'No replicates left.',
+        lines: G.failReason === 'pulse'
           ? ['In the real experiment the pulse samples were', 'harvested after exactly 15 min in PASN.', 'Try again, a bit faster.']
           : ['With zero replicates there is nothing to compare:', 'no mean, no variance, no test.', 'Even n = 3 is small, so protect your replicates!'],
-        'Press Enter to retry this level', '#b3261e');
+        footer: 'Enter: retry this level  ·  Esc: main menu', accent: '#b3261e',
+      });
       break;
     case 'win':
-      panel('All samples measured!', `Strain ${S.label} · total score ${G.score}${G.newBest ? '  (new best!)' : ''}`,
-        G.results.map(r => `${r.name}: ${r.total} points (S–S ${r.cystine}, Fe ${r.iron}, ${r.reps}/3 replicates)`).concat([''], strainFact(G.strain)),
-        'Press Enter to play another strain', '#7a5a00');
+      panel({
+        title: 'All samples measured!', sub: `Strain ${S.label} · total score ${G.score}${G.newBest ? '  (new best!)' : ''}`,
+        lines: G.results.map(r => `${r.name}: ${r.total} points  ${'★'.repeat(r.stars.filter(Boolean).length)}${'☆'.repeat(3 - r.stars.filter(Boolean).length)}  (S–S ${r.cystine}/${r.totalCys}, ${r.reps}/3 replicates)`).concat([''], strainFact(G.strain)),
+        footer: 'Press Enter to play another strain', accent: '#7a5a00',
+      });
       break;
   }
 }
@@ -1103,4 +1805,5 @@ function frame(now) {
   draw();
   requestAnimationFrame(frame);
 }
+AUDIO.music('title');
 requestAnimationFrame(frame);
