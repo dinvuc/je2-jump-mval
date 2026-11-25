@@ -15,4 +15,8 @@ A small HTML5 canvas game made by Bio253 group mval, themed on the course's
   lacks most Stk1 (polar effect).
 - Game mechanics are metaphors. Label them as such in the README, and do not
   turn them into biological claims. Do not invent references.
+- One file per concern in `js/` (see the Files table in the README); keep the
+  script order in `index.html` and `tests/harness.cjs` in sync.
+- Run `npm test` (both suites) before committing. New levels or generated
+  layouts must pass the single-jump route search in `tests/routes.cjs`.
 - No AI co-author trailers in commits.

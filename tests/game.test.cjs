@@ -45,12 +45,13 @@ check('part 1 ends at a gate that saves a stock and carries the run into part 2'
     run('draw(); for (let i=0;i<220;i++) updateFx(); draw();'); assert.equal(run('L.bannerT'),0);
   }
 });
-check('failing in part 2 restarts part 2 from the gate, not the whole map', () => {
-  // n = 0, then Enter on the game-over screen
+check('failing in part 2 bursts the cell, then restarts part 2 from the gate by itself', () => {
+  // n = 0: a short lysis animation, then an automatic restart (no panel to click)
   reset(2); run("L.time=1200; L.points=500; P.reps=2; var gate=L.ents.find(e=>e.type==='stage'); P.x=gate.x; P.y=gate.y; updateEntities();");
   run("L.time=3000; L.points=900; P.x+=300; L.ents.find(e=>e.type==='check').on=true; P.reps=1; loseReplicate('test');");
-  assert.equal(run('G.state'),'gameOver'); run('draw();');
-  run('pressed.ok=true; update();');
+  assert.equal(run('G.state'),'lysis'); run('draw();');
+  run('for (let i=0;i<69;i++) update();'); assert.equal(run('G.state'),'lysis');
+  run('update();');
   assert.equal(run('G.state'),'play'); assert.equal(run('L.stage'),1);
   assert.equal(run('L.time'),1200); assert.equal(run('L.points'),500); assert.equal(run('P.reps'),3);
   assert(run('P.x === L.respawn.x')); assert.equal(run('L.retries'),1); assert.equal(run('L.bannerT'),200);
@@ -61,9 +62,10 @@ check('failing in part 2 restarts part 2 from the gate, not the whole map', () =
   // the pause menu offers "Restart part 2"
   run("setState('paused'); G.menuIdx=2;"); assert.equal(run('menuItems()[2]'),'Restart part 2');
   run('L.time=5000; menuSelect();'); assert.equal(run('L.stage'),1); assert.equal(run('L.time'),600);
-  // part 1 still restarts the whole map
-  reset(0); run("P.reps=1; loseReplicate('test'); pressed.ok=true; update();");
-  assert.equal(run('G.state'),'intro'); assert.equal(run('L.stage'),0);
+  // part 1 restarts the whole map at once, skipping the intro; Enter skips the wait
+  reset(0); run("P.reps=1; loseReplicate('test'); for (let i=0;i<17;i++) update(); pressed.ok=true; update();");
+  assert.equal(run('G.state'),'play'); assert.equal(run('L.stage'),0);
+  assert.equal(run('G.deaths'),1); assert.equal(run('P.reps'),3);
 });
 check('TSB and SN exits accept the sample without collecting or unlocking anything', () => {
   for (const level of [0,2]) {
@@ -175,8 +177,8 @@ check('resizing and scaled pointer input preserve game and menu coordinates', ()
   reset(); const x=run('P.x'); setDisplayWidth(1200);
   assert.equal(mainCanvas.width,2400); assert.equal(run('P.x'),x); run('draw();');
   setDisplayWidth(480); assert.equal(mainCanvas.width,960); run('draw(); G.state="title";');
-  mainCanvas.handlers.pointerdown({clientX:460/2,clientY:414/2}); assert.equal(run('G.startLevel'),1);
-  mainCanvas.handlers.pointerdown({clientX:750/2,clientY:280/2});
+  mainCanvas.handlers.pointerdown({clientX:460/2,clientY:384/2}); assert.equal(run('G.startLevel'),1);
+  mainCanvas.handlers.pointerdown({clientX:750/2,clientY:250/2});
   assert.equal(run('G.strain'),'stp'); assert.equal(run('G.state'),'intro');
 });
 require('./routes.cjs')({run,reset,check});
@@ -203,7 +205,7 @@ check('hard runs faster, shortens hit protection and keeps separate records', ()
   run("hurt('ros','test');"); assert.equal(run('P.inv'),45); assert.equal(run('P.reps'),2);
   assert.equal(run('runKey()'),'5:TSB:anc:hard'); assert.equal(run('bestScoreKey()'),'je2jump_v3_best_hard');
   reset(1,'anc',150); assert.equal(run('L.timeLimit'),300);
-  assert.equal(run('menuItems().length'),6); run('update(); draw();'); assert.equal(run('G.state'),'play');
+  assert.equal(run('menuItems().length'),7); run('update(); draw();'); assert.equal(run('G.state'),'play');
 });
 check('lower difficulty slows the world while normal mode keeps the original cadence', () => {
   for (const difficulty of [0,25,50,75,100]) {

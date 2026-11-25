@@ -104,11 +104,56 @@ kbd {
 #touch .dash { font-size: 15px; background: #654916cc; }
 #touch .pause { position: absolute; top: 23%; right: 8px; width: 38px; height: 32px; border-radius: 8px; font-size: 18px; background: #142c3ed9; }
 #touch button[hidden] { display: none; }
+/* the lab-notebook post-it in the masthead: a <details> element, so it needs no script */
+.masthead-tools { display: flex; align-items: center; gap: 14px; }
+.lab-note { position: relative; }
+.lab-note summary {
+  list-style: none; cursor: pointer; display: grid; grid-template-columns: auto auto; column-gap: 8px; align-items: baseline;
+  padding: 8px 14px 9px 22px; transform: rotate(-2.5deg);
+  background: linear-gradient(180deg, #fff59d 0%, #ffe970 100%); color: #3c3200;
+  border-radius: 2px 2px 10px 2px; box-shadow: 0 6px 14px #0007, inset 0 -6px 10px #c9a80022;
+  font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive; transition: transform 0.15s ease;
+}
+.lab-note summary::-webkit-details-marker { display: none; }
+.lab-note summary:hover { transform: rotate(0deg) translateY(-2px); }
+.lab-note summary:focus-visible { outline: 3px solid #f5ca65; outline-offset: 4px; }
+.lab-note .pin { position: absolute; top: -6px; left: 50%; width: 13px; height: 13px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ff9a9a, #c62828 60%, #7f1010); box-shadow: 0 2px 3px #0008; }
+.lab-note .note-kicker { grid-column: 1 / -1; font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.75; }
+.lab-note strong { font-size: 0.95rem; }
+.lab-note .note-hint { font-size: 0.7rem; opacity: 0.7; }
+.lab-note:not([open]) summary { animation: note-wiggle 5s ease-in-out infinite; }
+@keyframes note-wiggle { 0%, 88%, 100% { transform: rotate(-2.5deg); } 92% { transform: rotate(1.5deg); } 96% { transform: rotate(-4deg); } }
+.lab-note-body {
+  position: absolute; right: 0; top: calc(100% + 12px); z-index: 20; width: min(440px, 92vw);
+  padding: 16px 20px 14px 46px; color: #263238; border-radius: 4px; box-shadow: 0 18px 50px #000a;
+  background: #fffef6 repeating-linear-gradient(180deg, transparent 0 25px, #b3d4f2 25px 26px);
+  background-position: 0 6px; font-size: 0.86rem; line-height: 26px;
+}
+.lab-note-body::before { content: ""; position: absolute; left: 32px; top: 0; bottom: 0; width: 2px; background: #ef9a9a; }
+.lab-note-body h2 { margin: 0; font: 700 1.1rem "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive; color: #1a4a5a; line-height: 26px; }
+.lab-note-body .note-date { margin: 0; font-size: 0.72rem; color: #6b7b80; letter-spacing: 0.04em; }
+.lab-note-body ul { margin: 0; padding-left: 16px; }
+.lab-note-body li { margin: 0; }
+.lab-note-body li::marker { content: "✓  "; color: #2e7d32; }
+.lab-note-body kbd { background: #e7eef2; color: #1d3443; border-color: #9fb3bd; }
+.lab-note-body .note-foot { margin: 4px 0 0; font-size: 0.74rem; color: #6b7b80; font-style: italic; }
+#share-panel {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 5; width: min(520px, 90%);
+  padding: 14px; border-radius: 12px; background: #fbf8f1; color: #22343b; box-shadow: 0 10px 40px #0008;
+}
+#share-panel[hidden] { display: none; }
+#share-panel p { margin: 0 0 8px; font-weight: 700; }
+#share-panel textarea { width: 100%; font: 0.9rem ui-monospace, Consolas, monospace; border: 1px solid #9fb3bd; border-radius: 8px; padding: 8px; color: #13212b; background: #fff; }
+#share-panel div { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+#share-panel button { border: 1px solid #276a67; border-radius: 8px; padding: 6px 14px; background: #276a67; color: #fff; font: 800 0.85rem system-ui, sans-serif; cursor: pointer; }
 #stage:fullscreen { width: 100vw; height: 100dvh; display: grid; place-items: center; border: 0; border-radius: 0; background: #08131b; }
 #stage:fullscreen #game-view { width: min(100vw, 176.47dvh); }
 #stage:fullscreen canvas { width: min(100vw, 176.47dvh); height: auto; max-height: 100dvh; }
 @media (max-width: 700px) {
   main { padding: 10px 8px; }
+  .masthead-tools { gap: 8px; }
+  .lab-note summary { padding: 6px 10px 7px 16px; }
+  .lab-note .note-hint { display: none; }
   .masthead { margin-bottom: 8px; }
   #stage { width: 100%; }
   .help { font-size: 0.75rem; }

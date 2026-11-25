@@ -48,11 +48,11 @@ const sandbox = vm.createContext({
     getElementById: id => id === 'game' ? mainCanvas : id === 'touch' ? touch : controls[id] || null },
 });
 const run = code => vm.runInContext(code, sandbox);
-for (const file of ['facts', 'levels', 'runtime', 'game']) {
+for (const file of ['facts', 'levels', 'endless', 'audio', 'runtime', 'effects', 'codex', 'share', 'modes', 'replay', 'game']) {
   const filename = path.join(__dirname, '..', 'js', `${file}.js`);
   new vm.Script(fs.readFileSync(filename, 'utf8'), { filename }).runInContext(sandbox);
 }
 
-const reset = (level = 0, strain = 'anc', difficulty = 100) => run("for (const key in keys) keys[key] = false; G.studySeen = {}; G.difficulty = " + difficulty + "; G.strain = '" + strain + "'; G.levelIdx = " + level + "; loadLevel(" + level + "); setState('play');");
+const reset = (level = 0, strain = 'anc', difficulty = 100) => run("for (const key in keys) keys[key] = false; G.studySeen = {}; G.mode = 'story'; G.rival = null; G.difficulty = " + difficulty + "; G.strain = '" + strain + "'; G.levelIdx = " + level + "; loadLevel(" + level + "); setState('play');");
 module.exports = { run, reset, storage, events, mainCanvas, sandbox, controls,
   setDisplayWidth(value) { displayWidth = value; events.resize(); } };

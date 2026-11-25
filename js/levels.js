@@ -87,6 +87,10 @@ const flow = cilia;
 const debris = (L, x0, x1, y0, y1) => fill(L, x0, x1, y0, y1, 'B');
 const ribo = (L, x, y, item) => { fill(L, x, x, y, y, 'R'); L.ribo[x + ',' + y] = item; };
 const put = (L, type, x, y, extra = {}) => L.ents.push({ type, tx: x, ty: y, ...extra });
+// Secret rooms: 'H' tiles look like biofilm but the cell can pass through them
+// (enemies cannot). Each map hides one golden cluster; see README 'Secrets'.
+const hidden = (L, x0, x1, y0, y1) => fill(L, x0, x1, y0, y1, 'H');
+const secretRoom = (L, room, wall, x, y) => { carve(L, ...room); hidden(L, ...wall); put(L, 'secret', x, y); };
 const row = (L, type, x0, x1, y) => { for (let x = x0; x <= x1; x++) put(L, type, x, y); };
 const sign = (L, x, y, text) => L.signs.push({ tx: x, ty: y, text });
 const arrow = (L, x, y, dir) => put(L, 'arrow', x, y, { dir });
@@ -115,6 +119,7 @@ function buildTSB() {
   put(L, 'cystine', 18, 23); put(L, 'cystine', 22, 21); put(L, 'cystine', 26, 21);
   arrow(L, 15, 25, 'right');
   debris(L, 30, 31, 25, 25); put(L, 'iron', 32, 25);
+  secretRoom(L, [26, 27, 24, 25], [28, 28, 24, 25], 26, 25);
   put(L, 'check', 33, 25);
   // Room 2: the canopy hill. Climb the strands (or bounce) onto it, or walk into the
   // tunnel, where a flow channel pushes against you. A shaft links the two.
@@ -163,6 +168,7 @@ function buildSNpulse() {
   foam(L, 9, 11, 63); solid(L, 12, 13, 62, 63); foam(L, 14, 16, 63); solid(L, 17, 18, 62, 63); foam(L, 19, 21, 63);
   put(L, 'cystine', 12, 61); put(L, 'cystine', 17, 61); row(L, 'cystine', 24, 26, 63);
   put(L, 'omv', 28, 63); put(L, 'peptide', 39, 63);
+  secretRoom(L, [31, 39, 65, 65], [36, 37, 64, 64], 32, 65); row(L, 'cystine', 33, 35, 65);
   for (const [x,y] of [[34,62],[30,60],[34,58],[30,56]]) { plat(L,x,y,3); put(L,'cystine',x+1,y-1); }
   drift(L, 33, 59, 0, 2, 200);
   solid(L, 0, 27, 54, 55);
@@ -227,6 +233,7 @@ function buildSN() {
   carve(L, 3, 34, 24, 26); carve(L, 3, 5, 22, 26);
   flow(L, 6, 30, 27, 1);
   put(L, 'check', 9, 21); put(L, 'check', 4, 26);
+  secretRoom(L, [0, 1, 25, 26], [2, 2, 25, 26], 0, 26);
   sign(L, 7, 21, 'Stay on the roof and time the foam geysers, or drop into the opening on the left: the flow channel below is fast, but LasA patrols it.');
   ribo(L, 12, 18, 'psm');
   geyser(L, 14, 21, 3, 0); put(L, 'omv', 19, 21); geyser(L, 22, 21, 3, 70); foam(L, 25, 26, 21); geyser(L, 29, 21, 3, 140);
@@ -266,6 +273,7 @@ function buildCF() {
   sign(L, 5, 67, 'Bonus setting, not the course experiment. Climb to the mucoid colony. Cilia tracks push you around: run against them or jump off. Brace with down during a cough.');
   ribo(L, 8, 64, 'psm'); put(L, 'twitch', 18, 67); mucus(L, 22, 27, 68);
   row(L, 'cystine', 12, 14, 67); arrow(L, 28, 67, 'up');
+  secretRoom(L, [31, 39, 69, 69], [36, 37, 68, 68], 32, 69); row(L, 'cystine', 33, 35, 69);
   // 1) Three cilia tracks; the first pushes you toward a foam patch.
   cilia(L, 30, 34, 66, 1); foam(L, 34, 34, 65);
   cilia(L, 35, 39, 64, -1); cilia(L, 29, 33, 62, -1);

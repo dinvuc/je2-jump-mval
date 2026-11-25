@@ -11,7 +11,28 @@
   <main>
     <header class="masthead">
       <div><h1>JE2 <span>JUMP</span></h1><p class="tagline">Small cell. Big reaction.</p></div>
-      <button id="fullscreen" class="screen-button" type="button">Full screen</button>
+      <div class="masthead-tools">
+        <details id="lab-note" class="lab-note">
+          <summary><span class="pin" aria-hidden="true"></span><span class="note-kicker">Lab notebook</span><strong>What's new?</strong><span class="note-hint">click to read</span></summary>
+          <div class="lab-note-body">
+            <p class="note-date">Entry · 25 Nov 2026 · protocol update</p>
+            <h2>New in the culture</h2>
+            <ul>
+              <li><b>Instant retry.</b> At n = 0 the cell bursts and the part restarts by itself. The results count your lost replicates (☠).</li>
+              <li><b>Split times.</b> The PART 2 gate shows your part-1 time: green if you are ahead of your best run, red if behind.</li>
+              <li><b>Share.</b> On results screens, <kbd>T</kbd> copies a one-line result, <kbd>L</kbd> copies a link that lets a friend race your ghost, <kbd>I</kbd> saves a micrograph screenshot (also in play).</li>
+              <li><b>Daily challenge.</b> One part, one strain, one rule of the day, the same for everyone.</li>
+              <li><b>Log phase.</b> A generated climb of 20 generations while a rising front chases you. A new climb every run.</li>
+              <li><b>Codex</b> (<kbd>B</kbd> on the title, or the pause menu). Everything you met, with the checked biology notes and a peptide album.</li>
+              <li><b>Secrets and chains.</b> One hidden room per map (look for cracked walls). Stomp enemies without landing for DOUBLE! TRIPLE!</li>
+              <li><b>Replays.</b> When a part took several attempts, all of them run at once on a map of the part.</li>
+              <li><b>Animations.</b> Faces that react, eyes that follow, a double-jump spin, bouncing blocks, LasA wind-ups, pickups flying into the HUD, stamped results.</li>
+            </ul>
+            <p class="note-foot">Game mechanics stay metaphors, not biological claims. Details in the README.</p>
+          </div>
+        </details>
+        <button id="fullscreen" class="screen-button" type="button">Full screen</button>
+      </div>
     </header>
     <div id="stage">
       <div id="game-view">
@@ -36,6 +57,11 @@
         <div class="study-navigation"><button id="study-prev" type="button">◀ Previous</button><span id="study-count"></span><button id="study-next" type="button">Next ▶</button></div>
         <p class="study-hint">Keep rolling to close · references in README</p>
       </aside>
+      <aside id="share-panel" aria-label="Copy your result" hidden>
+        <p>Your browser blocked copying. Select the text and copy it:</p>
+        <textarea id="share-text" rows="5" readonly></textarea>
+        <div><button id="share-copy" type="button">Copy</button><button id="share-close" type="button">Close</button></div>
+      </aside>
       <div id="touch" hidden>
         <button data-key="pause" class="pause" aria-label="pause or resume">Ⅱ</button>
         <button data-key="left" aria-label="left">◀</button>
@@ -53,6 +79,7 @@
       <kbd>C</kbd> stk dash · hold jump as stp to glide ·
       <kbd>X</kbd> shoot · <kbd>↓</kbd> brace ·
       <kbd>R</kbd> retry checkpoint · <kbd>G</kbd> personal ghost ·
+      <kbd>B</kbd> codex (title) · <kbd>T</kbd> share result · <kbd>L</kbd> race link · <kbd>I</kbd> micrograph ·
       <kbd>P</kbd> pause · <kbd>M</kbd> sound · <kbd>N</kbd> music
     </p>
     <p class="small">
@@ -62,7 +89,14 @@
   </main>
   <script src="js/facts.js"></script>
   <script src="js/levels.js"></script>
+  <script src="js/endless.js"></script>
+  <script src="js/audio.js"></script>
   <script src="js/runtime.js"></script>
+  <script src="js/effects.js"></script>
+  <script src="js/codex.js"></script>
+  <script src="js/share.js"></script>
+  <script src="js/modes.js"></script>
+  <script src="js/replay.js"></script>
   <script src="js/game.js"></script>
 </body>
 </html>

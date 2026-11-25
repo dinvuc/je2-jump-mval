@@ -48,6 +48,19 @@ function loadGhost() {
 function saveGhost() {
   try { localStorage.setItem(`je2jump_ghost_${runKey()}`, JSON.stringify({ v: RUN_VERSION, samples: L.recording })); } catch { /* storage full / private mode */ }
 }
+// Part splits of the personal-best run (seconds at each gate), per run key.
+function loadSplits() {
+  try {
+    const v = JSON.parse(localStorage.getItem('je2jump_v5_splits'));
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch { return {}; }
+}
+function saveSplits(key, splits) {
+  try { const v = loadSplits(); v[key] = splits; localStorage.setItem('je2jump_v5_splits', JSON.stringify(v)); } catch { /* storage full / private mode */ }
+}
+// Seconds played in this run (a daily part-2 start does not count the part-1 clock).
+function runSecs() { return (L.time - (L.timeBase || 0)) / 60; }
+const fmtDelta = d => (d < 0 ? '−' : '+') + Math.abs(d).toFixed(1) + ' s';
 
 function startDash() {
   if (G.strain !== 'stk' || P.dashCool > 0 || !P.onGround) return;
@@ -70,21 +83,27 @@ function captureCheckpoint() {
 function restoreSnapshot(snapshot) {
   const saved = structuredClone(snapshot);
   Object.assign(L, saved.world); P = saved.player;
-  Object.assign(L, { fx: [], pops: [], callouts: [], shots: [], combo: 0, comboT: 0,
+  Object.assign(L, { fx: [], pops: [], callouts: [], shots: [], combo: 0, comboT: 0, tags: [], bigs: [], flyers: [],
     abWarn: 0, abOn: 0, abExpose: 0, coughing: 0, coughWarn: 0, coughFlash: 0, goalMsgT: 0 });
+  L.bumps.clear();
   L.jiggle.clear(); P.inv = 90; P.dash = 0; P.damageT = 0;
   for (const k in keys) keys[k] = false;
   G.hitStop = 0; G.shake = 0; G.failReason = '';
 }
 function retryCheckpoint() {
   if (!L || !L.checkpoint) return;
+  // the daily challenge and the log phase restart instantly instead
+  if (G.mode === 'daily') { endAttempt('retry'); startDaily(false); return; }
+  if (G.mode === 'log') { startLogPhase(false); return; }
+  endAttempt('retry');
   const penalty = L.difficulty === 0 ? 0 : 180;
   if (L.timeLimit && L.time / 60 + penalty / 60 >= L.timeLimit) {
     if (L.stage > 0) { restartPart(); return; }   // the part 2 gate still counts
-    loadLevel(G.levelIdx); setState('play'); return;
+    loadLevel(G.levelIdx, { keepDeaths: true }); setState('play'); return;
   }
   const oldPosition = [P.x, P.y, P.face];
   restoreSnapshot(L.checkpoint);
+  newAttempt();
   L.time += penalty; L.retries++;
   if (penalty && L.recording.length < 11998) {
     L.recording.push([L.time - 1, Math.round(oldPosition[0]), Math.round(oldPosition[1]), oldPosition[2], L.stage],
@@ -98,8 +117,10 @@ function retryCheckpoint() {
 // it was when you walked through the gate, with all three replicates restored.
 function restartPart() {
   const start = L.stageStart;
+  endAttempt('lost');
   restoreSnapshot(start.checkpoint);
-  P.reps = 3;
+  newAttempt();
+  P.reps = L.maxReps;
   L.checkpoint = structuredClone({ world: start.checkpoint.world, player: P });
   L.time = start.time; L.retries++;
   L.recording.length = Math.min(L.recording.length, start.samples); L.ghostIndex = 0;
@@ -109,23 +130,32 @@ function restartPart() {
 }
 
 function recordRun() {
-  if (L.time % 6 === 0 && L.recording.length < 12000 && (!L.recording.length || L.recording[L.recording.length - 1][0] < L.time)) L.recording.push([L.time, Math.round(P.x), Math.round(P.y), P.face, L.stage]);
+  if (L.time % 6 !== 0) return;
+  recordAttempt();
+  if (L.recording.length < 12000 && (!L.recording.length || L.recording[L.recording.length - 1][0] < L.time)) L.recording.push([L.time, Math.round(P.x), Math.round(P.y), P.face, L.stage]);
 }
+// Your personal-best ghost, plus a rival ghost from a race link (story mode only).
 function drawGhost() {
-  if (!G.ghostOn || !L.ghost || !L.ghost.samples.length) return;
-  const a = L.ghost.samples;
-  while (L.ghostIndex + 1 < a.length && a[L.ghostIndex + 1][0] <= L.time) L.ghostIndex++;
-  const p = a[L.ghostIndex], n = a[L.ghostIndex + 1] || p;
+  if (!G.ghostOn) return;
+  if (L.ghost && L.ghost.samples.length) {
+    L.ghostIndex = drawGhostTrack(L.ghost.samples, L.ghostIndex, '#e9fcff', 'PB', '#f4ffff');
+  }
+  if (L.rival) L.rivalIndex = drawGhostTrack(L.rival.samples, L.rivalIndex, '#ff8a96', 'RIVAL', '#ffd0d6');
+}
+function drawGhostTrack(a, index, ring, label, labelColour) {
+  while (index + 1 < a.length && a[index + 1][0] <= L.time) index++;
+  const p = a[index], n = a[index + 1] || p;
   // Samples carry the map part they were recorded in (older samples: part 1).
-  if ((p[4] || 0) !== L.stage || (n[4] || 0) !== L.stage) return;
-  if (L.time < p[0] || L.time > a[a.length - 1][0]) return;
+  if ((p[4] || 0) !== L.stage || (n[4] || 0) !== L.stage) return index;
+  if (L.time < p[0] || L.time > a[a.length - 1][0]) return index;
   const t = n[0] === p[0] ? 0 : clamp((L.time - p[0]) / (n[0] - p[0]), 0, 1);
   const x = p[1] + (n[1] - p[1]) * t + 12, y = p[2] + (n[2] - p[2]) * t + 14;
   ctx.save(); ctx.globalAlpha = 0.35;
-  drawCoccus(x, y, 14, '#e9fcff', { face: p[3] });
-  ctx.setLineDash([3, 4]); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+  drawCoccus(x, y, 14, ring, { face: p[3] });
+  ctx.setLineDash([3, 4]); ctx.strokeStyle = ring; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.arc(x, y, 21, 0, TAU); ctx.stroke(); ctx.restore();
-  text('PB', x, y - 28, { size: 12, align: 'center', color: '#f4ffff', weight: '800' });
+  text(label, x, y - 28, { size: 12, align: 'center', color: labelColour, weight: '800' });
+  return index;
 }
 
 function drawDamageFeedback() {
@@ -149,7 +179,7 @@ function drawAbilityHUD() {
     text(ahead > 0 ? 'AHEAD OF EXPOSURE' : 'IN EXPOSURE', 866, 77, { size: 12, color: ahead > 0 ? '#9fffe0' : '#ffc99b', align: 'center', weight: '800' });
     text(ahead > 0 ? ahead + ' tiles clear' : 'Sources fire faster', 866, 94, { size: 12, color: '#e6f3fa', align: 'center' });
   }
-  text('R retry stock · G ghost ' + (G.ghostOn ? 'on' : 'off'), VIEW_W - 18, VIEW_H - 14, { size: 12, color: '#f5fcff', align: 'right', weight: '700' });
+  text((G.mode === 'story' ? 'R retry stock' : 'R restart') + ' · G ghost ' + (G.ghostOn ? 'on' : 'off') + ' · I micrograph', VIEW_W - 18, VIEW_H - 14, { size: 12, color: '#f5fcff', align: 'right', weight: '700' });
   if (L.difficulty !== 100 && G.toastT <= 0) {
     roundRect(210, 58, 250, 30, 10, 'rgba(10,31,43,0.92)', '#a7e0d4', 1);
     text(L.difficulty < 100 ? 'STUDY · B read nearby station' : 'HARD · faster pace', 222, 78, { size: 12, color: '#c3ffdf', weight: '800' });

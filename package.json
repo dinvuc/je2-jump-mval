@@ -1,0 +1,9 @@
+{
+  "name": "je2-jump",
+  "private": true,
+  "description": "A small HTML5 canvas platformer about the Bio253 S. aureus JE2 proteomics course. No dependencies and no build step.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node tests/game.test.cjs && node tests/features.test.cjs"
+  }
+}

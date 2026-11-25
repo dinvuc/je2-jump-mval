@@ -19,6 +19,8 @@ const SPRING_V = -15.5;                     // swollen-cell bounce (~6 rows)
 const MAX_AMMO = 20;                        // PSM shots you can carry
 const SOLID = new Set(['#', '~', '<', '>', 'B', 'R', 'U']);   // biofilm, mucus, cilia, debris, ribosome (U = used)
 const isSolid = c => SOLID.has(c);
+// Hidden passages ('H') let the player through but stop enemies, items and drops.
+const enemySolid = c => SOLID.has(c) || c === 'H';
 const ENEMIES = new Set(['lasa', 'omv', 'lasb', 'pa', 'twitch', 'sidero', 'rosb']);
 
 const canvas = document.getElementById('game');
@@ -45,13 +47,15 @@ const KEYMAP = {
   KeyP: ['pause'], Escape: ['pause'], Digit1: ['s1'], Digit2: ['s2'], Digit3: ['s3'],
   KeyM: ['mute'], KeyN: ['music'], KeyX: ['shoot'], KeyK: ['shoot'], ShiftLeft: ['shoot'], ShiftRight: ['shoot'],
   KeyC: ['dash'], KeyR: ['retry'], KeyG: ['ghost'],
-  KeyB: ['biology'],
+  KeyB: ['biology'], KeyT: ['share'], KeyL: ['link'], KeyI: ['photo'],
 };
 function press(k) { if (!keys[k]) pressed[k] = true; keys[k] = true; }
 function release(k) { keys[k] = false; }
 addEventListener('keydown', e => {
   AUDIO.unlock();
   if (difficultyButtons.includes(e.target)) return;
+  if (e.target && e.target.tagName === 'TEXTAREA') return;   // typing in the share panel
+  if (e.target && e.target.tagName === 'SUMMARY' && ['Enter', 'Space'].includes(e.code)) return;   // the lab note opens natively
   if (studyButtons.includes(e.target) && ['Enter', 'Space'].includes(e.code)) return;
   const ks = KEYMAP[e.code];
   if (!ks) return;
@@ -63,167 +67,6 @@ addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 addEventListener('pointerdown', () => AUDIO.unlock());
 function took(k) { const p = !!pressed[k]; pressed[k] = false; return p; }
 function clearPressed() { for (const k in pressed) pressed[k] = false; }
-
-// ---- audio: synthesised effects and an original chiptune soundtrack ----------------
-// Everything is generated with Web Audio oscillators and noise: no sound files, no
-// samples, no third-party music. The soundtrack below was composed for this game.
-// The audio context only starts after a key press or click (browser rule).
-const AUDIO = (() => {
-  let ac = null, sfxBus = null, musBus = null, musFilter = null, noise = null, intensity = 0, muffled = false;
-  let sfxOn = true, musicOn = true;
-  try {
-    sfxOn = localStorage.getItem('je2jump_muted') !== '1';
-    musicOn = localStorage.getItem('je2jump_music') !== '0';
-  } catch { /* private mode */ }
-  const save = () => { try { localStorage.setItem('je2jump_muted', sfxOn ? '0' : '1'); localStorage.setItem('je2jump_music', musicOn ? '1' : '0'); } catch { /* private mode */ } };
-  const midi = n => 440 * Math.pow(2, (n - 69) / 12);
-
-  function init() {
-    ac = new (window.AudioContext || window.webkitAudioContext)();
-    sfxBus = ac.createGain(); sfxBus.gain.value = 1; sfxBus.connect(ac.destination);
-    musBus = ac.createGain(); musBus.gain.value = 0.55;
-    musFilter = ac.createBiquadFilter(); musFilter.type = 'lowpass'; musFilter.frequency.value = 20000;   // muffles the music in tunnels
-    musBus.connect(musFilter).connect(ac.destination);
-    noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
-    const d = noise.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    setInterval(schedule, 25);
-  }
-  function tone(f0, f1, dur, type, vol, t, bus) {
-    const o = ac.createOscillator(), g = ac.createGain();
-    o.type = type;
-    o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g).connect(bus); o.start(t); o.stop(t + dur + 0.03);
-  }
-  function hiss(dur, vol, t, freq, bus) {
-    const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
-    s.buffer = noise; f.type = 'highpass'; f.frequency.value = freq;
-    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    s.connect(f).connect(g).connect(bus); s.start(t); s.stop(t + dur + 0.02);
-  }
-
-  // -- sound effects --
-  const fx = (f0, f1, dur, type = 'square', vol = 0.05, delay = 0) => tone(f0, f1, dur, type, vol, ac.currentTime + delay, sfxBus);
-  const arp = (fs, step, type = 'triangle', vol = 0.05, dur = 0.12) => fs.forEach((f, i) => fx(f, f, dur, type, vol, i * step));
-  const SOUNDS = {
-    jump: () => fx(300, 560, 0.12, 'square', 0.03),
-    dj: () => fx(520, 1040, 0.14, 'triangle', 0.05),
-    cys: k => { const m = 1 + 0.12 * (k - 1); fx(880 * m, 880 * m, 0.06, 'square', 0.025); fx(1320 * m, 1320 * m, 0.09, 'square', 0.025, 0.05); },
-    iron: k => { const m = 1 + 0.12 * (k - 1); fx(520 * m, 980 * m, 0.14, 'triangle', 0.06); },
-    power: () => arp([523, 659, 784, 1047], 0.06),
-    hurt: () => fx(220, 70, 0.3, 'sawtooth', 0.05),
-    stomp: () => fx(420, 110, 0.16, 'square', 0.045),
-    check: () => arp([784, 1175], 0.08, 'sine', 0.06),
-    pop: () => fx(900, 300, 0.08, 'sine', 0.04),
-    crack: () => { fx(170, 55, 0.14, 'sawtooth', 0.035); hiss(0.12, 0.05, ac.currentTime, 1500, sfxBus); },
-    dash: () => fx(160, 740, 0.16, 'triangle', 0.05),
-    off: () => arp([660, 440], 0.08, 'sine', 0.04),
-    done: k => arp([                                       // a different victory jingle per level
-      [523, 659, 784, 1047, 1319],                         // TSB: bright C major
-      [587, 740, 880, 1175, 880, 1175],                    // SNpulse: quick D major
-      [440, 523, 659, 880, 1047, 1319],                    // SN: from A minor up to C
-      [392, 494, 587, 784, 988, 1175, 1568],               // CF: a long fanfare
-    ][(k - 1) % 4], 0.09, 'triangle', 0.06, 0.18),
-    goal: () => arp([784, 988, 1319], 0.07, 'sine', 0.06, 0.2),
-    mist: () => { hiss(2.5, 0.05, ac.currentTime, 3000, sfxBus); hiss(2.5, 0.03, ac.currentTime + 0.4, 6000, sfxBus); },
-    fail: () => arp([392, 330, 262, 196], 0.14, 'triangle', 0.06, 0.2),
-    click: () => fx(660, 660, 0.05, 'square', 0.03),
-    move: () => fx(440, 440, 0.03, 'square', 0.02),
-    shoot: () => fx(900, 500, 0.08, 'square', 0.03),
-    boing: () => fx(180, 720, 0.22, 'sine', 0.08),
-    ribo: () => arp([392, 523, 784], 0.05, 'square', 0.04, 0.1),
-    breakb: () => { hiss(0.15, 0.08, ac.currentTime, 800, sfxBus); fx(140, 60, 0.12, 'square', 0.04); },
-    peptide: () => arp([659, 880, 1175, 1568], 0.06, 'sine', 0.06, 0.18),
-    cough: () => {
-      for (const d of [0, 0.28]) { hiss(0.32, 0.22, ac.currentTime + d, 120, sfxBus); fx(140, 70, 0.25, 'sawtooth', 0.05, d); }
-    },
-    warn: () => arp([880, 660, 880], 0.12, 'square', 0.03, 0.08),
-    bossHit: () => { fx(300, 90, 0.18, 'square', 0.06); hiss(0.08, 0.06, ac.currentTime, 2000, sfxBus); },
-    bossDie: () => { arp([523, 392, 330, 262, 196, 131], 0.08, 'sawtooth', 0.05, 0.2); hiss(0.8, 0.12, ac.currentTime, 300, sfxBus); },
-  };
-
-  // -- the soundtrack: 8 bars (128 sixteenth steps), chords C Am F G | C Am F G --
-  // Melody notes: [step, midi note, length in steps]. Original composition.
-  const MELODY = [
-    [0, 76, 2], [2, 79, 2], [4, 84, 3], [8, 83, 1], [9, 84, 1], [10, 79, 2], [12, 76, 4],
-    [16, 81, 2], [18, 84, 2], [20, 88, 3], [24, 86, 1], [25, 84, 1], [26, 83, 2], [28, 81, 4],
-    [32, 77, 2], [34, 81, 2], [36, 84, 2], [38, 86, 2], [40, 84, 2], [42, 81, 2], [44, 77, 2], [46, 79, 2],
-    [48, 79, 3], [51, 81, 1], [52, 83, 2], [54, 86, 2], [56, 91, 4], [60, 86, 2], [62, 83, 2],
-    [64, 79, 1], [65, 79, 1], [66, 84, 2], [68, 88, 2], [70, 91, 2], [72, 88, 2], [74, 84, 2], [76, 86, 4],
-    [80, 88, 3], [83, 86, 1], [84, 84, 2], [86, 81, 2], [88, 84, 4], [92, 88, 4],
-    [96, 89, 2], [98, 88, 2], [100, 86, 2], [102, 84, 2], [104, 81, 4], [108, 84, 2], [110, 86, 2],
-    [112, 83, 4], [116, 86, 2], [118, 83, 2], [120, 79, 8],
-  ];
-  const CHORDS = [[48, 52, 55], [45, 48, 52], [41, 45, 48], [43, 47, 50]];   // C, Am, F, G
-  const melodyAt = new Map(MELODY.map(m => [m[0], m]));
-  // Per-medium arrangements: tempo, transposition, minor mode, lead sound, drum density.
-  const SONGS = {
-    title: { bpm: 108, tr: 0, minor: false, lead: 'square', drums: 1 },
-    TSB: { bpm: 116, tr: 0, minor: false, lead: 'square', drums: 1 },
-    SNpulse: { bpm: 138, tr: 2, minor: false, lead: 'square', drums: 2 },
-    SN: { bpm: 100, tr: -3, minor: true, lead: 'triangle', drums: 1 },
-    'CF airway': { bpm: 108, tr: -5, minor: true, lead: 'triangle', drums: 1 },
-    boss: { bpm: 152, tr: -2, minor: true, lead: 'square', drums: 2 },
-  };
-  let song = null, step = 0, nextT = 0;
-  const pitch = n => {
-    if (song.minor) { const pc = ((n % 12) + 12) % 12; if (pc === 4 || pc === 9 || pc === 11) n -= 1; }   // major -> natural minor
-    return midi(n + song.tr);
-  };
-  function playStep(s, t) {
-    const sp = 60 / song.bpm / 4, bar = Math.floor(s / 16), chord = CHORDS[bar % 4], inBar = s % 16;
-    const m = melodyAt.get(s);
-    if (m) tone(pitch(m[1]), pitch(m[1]), m[2] * sp * 0.95, song.lead, song.lead === 'square' ? 0.035 : 0.07, t, musBus);
-    if (inBar % 2 === 0) {                                   // bouncy octave bass
-      const n = chord[0] - 12 + (inBar % 4 === 2 ? 12 : 0);
-      tone(pitch(n), pitch(n), sp * 1.6, 'triangle', 0.11, t, musBus);
-    }
-    const an = chord[inBar % 3] + 12;                        // soft arpeggio
-    tone(pitch(an), pitch(an), sp * 0.9, 'sine', 0.025, t, musBus);
-    if (inBar === 0 || inBar === 8 || (song.drums > 1 && inBar === 10)) tone(150, 45, 0.14, 'sine', 0.22, t, musBus);   // kick
-    if (inBar === 4 || inBar === 12) hiss(0.11, 0.07, t, 1200, musBus);                                                  // snare
-    if (song.drums > 1 ? true : inBar % 2 === 0) hiss(0.03, inBar % 4 === 2 ? 0.035 : 0.018, t, 7000, musBus);          // hi-hat
-    if (intensity > 0.5) {                                   // danger layer: enemies nearby
-      if (inBar % 2 === 1) hiss(0.025, 0.03, t, 9000, musBus);
-      if (inBar === 6 || inBar === 14) tone(240, 110, 0.12, 'sine', 0.16, t, musBus);
-      if (inBar === 15) tone(330, 140, 0.1, 'sine', 0.12, t, musBus);
-    }
-  }
-  function schedule() {
-    if (!ac || !song || !musicOn) return;
-    if (nextT < ac.currentTime - 0.2) nextT = ac.currentTime + 0.05;   // tab was in the background
-    while (nextT < ac.currentTime + 0.12) {
-      playStep(step, nextT);
-      nextT += 60 / song.bpm / 4;
-      step = (step + 1) % 128;
-    }
-  }
-
-  return {
-    play(name, arg = 1) { if (ac && sfxOn && SOUNDS[name]) SOUNDS[name](arg); },
-    unlock() {
-      if (!ac) { try { init(); } catch { return; } }
-      if (ac.state === 'suspended') ac.resume();
-    },
-    music(name) {
-      const s = SONGS[name] || SONGS.title;
-      if (s === song) return;
-      song = s; step = 0; if (ac) nextT = ac.currentTime + 0.08;
-    },
-    duck(on) { if (musBus) musBus.gain.setTargetAtTime(on ? 0.15 : 0.55, ac.currentTime, 0.1); },
-    muffle(on) {
-      if (on === muffled) return;
-      muffled = on;
-      if (musFilter) musFilter.frequency.setTargetAtTime(on ? 650 : 20000, ac.currentTime, 0.25);
-    },
-    intensity(v) { intensity = v; },
-    toggleSfx() { sfxOn = !sfxOn; save(); },
-    toggleMusic() { musicOn = !musicOn; save(); if (ac) nextT = ac.currentTime + 0.05; },
-    get sfxOn() { return sfxOn; },
-    get musicOn() { return musicOn; },
-  };
-})();
 
 // Touch buttons (only shown on touch screens).
 const touchBox = document.getElementById('touch');
@@ -255,11 +98,23 @@ canvas.addEventListener('pointerdown', e => {
   const r = canvas.getBoundingClientRect();
   const x = (e.clientX - r.left) * VIEW_W / r.width;
   const y = (e.clientY - r.top) * VIEW_H / r.height;
+  const inside = c => x > c.x && x < c.x + c.w && y > c.y && y < c.y + c.h;
+  const resultKind = { levelDone: 'level', win: 'win', dailyDone: 'daily', logDone: 'endless' }[G.state];
   if (G.state === 'title') {
-    const lv = levelChips().find(c => x > c.x && x < c.x + c.w && y > c.y && y < c.y + c.h);
-    if (lv) { G.startLevel = lv.i; AUDIO.play('move'); return; }
-    const hit = strainCards().find(c => x > c.x && x < c.x + c.w && y > c.y && y < c.y + c.h);
-    if (hit) { G.strain = hit.key; AUDIO.play('click'); startGame(); }
+    const lv = levelChips().find(inside);
+    if (lv) { setTitleSlot(lv.i); AUDIO.play('move'); return; }
+    const mode = modeChips().find(inside);
+    if (mode) {
+      if (mode.slot === 'codex') { AUDIO.play('click'); openCodex('title'); }
+      else { setTitleSlot(mode.slot); AUDIO.play('move'); }
+      return;
+    }
+    const hit = strainCards().find(inside);
+    if (hit) { if (G.titleMode !== 'daily') G.strain = hit.key; AUDIO.play('click'); startGame(); }
+  } else if (G.state === 'codex') {
+    codexClick(x, y);
+  } else if (resultKind && shareButtonAt(resultKind, x, y)) {
+    pressed[shareButtonAt(resultKind, x, y)] = true;
   } else if (G.state === 'paused') {
     const i = menuRects().findIndex(m => x > m.x && x < m.x + m.w && y > m.y && y < m.y + m.h);
     if (i >= 0) { G.menuIdx = i; menuSelect(); }
@@ -313,6 +168,8 @@ function mix(h1, h2, t) {
 // ---- game state ------------------------------------------------------------------
 const G = { state: 'title', difficulty: 100, studySeen: {}, studyTick: 0, strain: 'anc', levelIdx: 0, startLevel: 0, score: 0, results: [], toast: '', toastT: 0, best: loadBest(), seen: {}, shake: 0, menuIdx: 0 };
 G.ghostOn = true;
+// mode: 'story' (the four maps in order), 'daily' or 'log' (see modes.js).
+Object.assign(G, { mode: 'story', titleMode: 'story', deaths: 0, met: {}, codexIdx: 0, resultT: 0, shakeT: 0 });
 let L = null;  // the running level
 let P = null;  // the player
 
@@ -330,6 +187,13 @@ for (const button of difficultyButtons) {
   });
 }
 syncDifficultyControl();
+adoptRival(readRaceFromUrl());   // a "race my ghost" link selects that level and strain
+const sharePanel = document.getElementById('share-panel');
+if (sharePanel) {
+  const close = document.getElementById('share-close'), copy = document.getElementById('share-copy'), area = document.getElementById('share-text');
+  if (close) close.addEventListener('click', () => { sharePanel.hidden = true; });
+  if (copy && area) copy.addEventListener('click', () => { try { area.select(); document.execCommand('copy'); copy.textContent = 'Copied'; } catch { /* select by hand */ } });
+}
 for (const button of studyButtons) button.addEventListener('click', () => {
   if (button.id === 'study-open') toggleStudyStation();
   else if (button.id === 'study-close') { G.studyOpen = false; renderStudyStation(); }
@@ -341,14 +205,18 @@ function setState(s) {
   if (runSettings) runSettings.hidden = s !== 'title';
   if (s !== 'play') { G.studyStation = null; G.studyOpen = false; renderStudyStation(); }
   touchBox.hidden = !matchMedia('(pointer: coarse)').matches || (s !== 'play' && s !== 'paused');
-  AUDIO.music(s === 'title' ? 'title' : !L ? 'title' : L.bossActive && !L.bossDown ? 'boss' : L.def.name);
-  AUDIO.duck(s === 'paused');
+  const fromTitle = s === 'title' || (s === 'codex' && G.codexFrom === 'title');
+  AUDIO.music(fromTitle ? 'title' : !L ? 'title' : L.bossActive && !L.bossDown ? 'boss' : L.def.name);
+  AUDIO.duck(s === 'paused' || s === 'codex');
   if (s !== 'play' && s !== 'paused') { AUDIO.muffle(false); AUDIO.intensity(0); }
-  if (s === 'title') G.iris = 45;
+  if (s === 'title') { G.iris = 45; G.mode = 'story'; }
 }
 
 // Start at the level picked on the title screen; later levels follow in order.
 function startGame() {
+  if (G.titleMode === 'daily') { startDaily(); return; }
+  if (G.titleMode === 'log') { startLogPhase(); return; }
+  G.mode = 'story';
   G.levelIdx = G.startLevel; G.score = 0; G.results = []; G.seen = {}; G.studySeen = {}; G.newBest = false;
   loadLevel(G.levelIdx);
   setState('intro');
@@ -356,10 +224,15 @@ function startGame() {
 
 // Every map has two parts. Run-wide state (time, score, inventory, replicates)
 // lives on L for the whole map; setStageWorld swaps only the terrain and entities.
-function loadLevel(i) {
-  const def = LEVELS[i];
+// opts: def (another level definition, e.g. Log phase), stage (start in part 2),
+// mods (daily rule changes), keepDeaths (an instant restart keeps the death count).
+function loadLevel(i, opts = {}) {
+  const def = opts.def || LEVELS[i], stage = opts.stage || 0;
   const builds = def.stages.map(build => build());
   const count = type => builds.reduce((n, b) => n + b.ents.filter(e => e.type === type).length, 0);
+  const mods = { grav: 1, run: 1, ...(opts.mods || {}) };
+  if (!opts.keepDeaths) G.deaths = 0;
+  G.met = {};
   L = {
     def, idx: i, time: 0, cam: 0, camY: 0, cystine: 0, ironBank: 0, ironTotal: 0, points: 0,
     killFeed: [], killCount: {}, combo: 0, comboT: 0, kills: 0, peptides: 0,
@@ -371,15 +244,26 @@ function loadLevel(i) {
     abNext: 60 * (35 + Math.random() * 15), abWarn: 0, abOn: 0, abExpose: 0, covered: true,
     coughNext: 60 * (14 + Math.random() * 10), coughing: 0, coughWarn: 0, coughFlash: 0,
     totalCys: count('cystine'), totalPep: count('peptide'), totalStocks: count('check') + builds.length - 1, stocks: 0,
+    mods, maxReps: mods.maxReps || 3, timeBase: 0, splits: [], gen: 0,
+    lookX: VIEW_W * 0.1, lookY: 0, tags: [], bigs: [], flyers: [], hudBump: {}, shownScore: NaN,
+    attempts: {}, attempt: null, partArt: {}, bumps: new Map(), rivalIndex: 0,
   };
-  setStageWorld(builds[0], 0);
+  setStageWorld(builds[stage], stage);
+  // A daily challenge in part 2 of SNpulse starts with the clock where part 2 begins.
+  if (stage > 0 && def.timeLimit) {
+    const share = (def.stageShare || def.stages.map(() => 1 / def.stages.length)).slice(0, stage).reduce((a, b) => a + b, 0);
+    L.time = L.timeBase = Math.round(share * (L.timeLimit || def.timeLimit) * 60);
+  }
+  if (def.endless) L.front = (L.logBase + 4) * TILE;
   P = {
     x: L.respawn.x, y: L.respawn.y, w: 24, h: 28, vx: 0, vy: 0,
     onGround: false, coyote: 0, buffer: 0, djReady: true, groundT: 0,
-    face: 1, inv: 0, slow: 0, shield: 0, magnet: 0, phos: 0, reps: 3, squash: 0, ride: null, roll: 0,
+    face: 1, inv: 0, slow: 0, shield: 0, magnet: 0, phos: 0, reps: L.maxReps, squash: 0, ride: null, roll: 0,
     ammo: 0, gold: 0, shootCool: 0, sticky: 0, belt: 0, sprung: false,
     glide: 60, dash: 0, dashCool: 0, shootFlash: 0,
+    chain: 0, happy: 0, spin: 0, look: null, scared: false,
   };
+  L.rival = rivalMatches() ? G.rival : null;
   G.toast = ''; G.toastT = 0; G.failReason = ''; G.shake = 0; G.iris = 45; G.hitStop = 0; G.studyTick = 0;
   G.studyStation = null; G.studyOpen = false; G.studyIndex = 0; renderStudyStation();
   for (const g of def.goals) L.goalSeen[g.id] = g.id === 'reps' || g.id === 'time';
@@ -396,17 +280,24 @@ function setStageWorld(b, stage) {
     ents: b.ents.map(e => ({ ...e, x: e.tx * TILE, y: e.ty * TILE, alive: true, t: 0 })),
     fx: [], pops: [], callouts: [], movers: [], shots: [], lysis: new Map(), solids: [], plats: [], spawnQ: [],
     jiggle: new Map(), bossActive: false, goalMsgT: 0,
-    studyStations: G.difficulty < 100 ? STUDY_STATIONS[L.idx][stage] : [],
-    artSeed: L.idx + 10 * stage,
+    studyStations: G.difficulty < 100 ? ((STUDY_STATIONS[L.idx] || [])[stage] || []) : [],
+    artSeed: L.idx + 10 * stage, logBase: b.logBase,
   });
   L.art = buildLevelArt(b, L.def.theme, L.artSeed);
+  L.partArt[stage] = L.art.tiles;   // kept for the attempt replay at the end of the map
   for (const e of L.ents) initEntity(e);
   const start = L.ents.find(e => e.type === 'start');
   L.respawn = { x: start.x + 4, y: start.y + 4 };
+  newAttempt();
 }
 // The gate at the end of part 1 acts as a checkpoint: it saves a stock and
 // carries the run (time, score, replicates, inventory) into part 2.
 function enterStage(stage) {
+  endAttempt('clear');
+  // split time for the part just finished, compared with the personal-best run
+  const split = L.time / 60, pb = (loadSplits()[runKey()] || [])[stage - 1];
+  L.splits[stage - 1] = split;
+  L.splitDelta = Number.isFinite(pb) ? split - pb : null;
   setStageWorld(L.def.stages[stage](), stage);
   Object.assign(P, { x: L.respawn.x, y: L.respawn.y, vx: 0, vy: 0, ride: null, dash: 0, onGround: false, inv: 60, slow: 0 });
   L.stocks++;
@@ -415,7 +306,6 @@ function enterStage(stage) {
   L.stageStart = { checkpoint: L.checkpoint, time: L.time, samples: L.recording.length };
   snapCamera();
   AUDIO.play('check'); AUDIO.music(L.def.name);
-  toast(`Stock saved. ${L.def.part2}`, 260);
 }
 
 function initEntity(e) {
@@ -448,8 +338,9 @@ function once(key, text) { if (!G.seen[key]) { G.seen[key] = true; toast(text, 2
 // ---- camera: follows the player in x and y ---------------------------------------
 function cameraTarget() {
   return [
-    clamp(P.x + P.w / 2 - VIEW_W * 0.4, 0, L.cols * TILE - VIEW_W),
-    clamp(P.y + P.h / 2 - VIEW_H * 0.55, 0, L.rows * TILE - VIEW_H),
+    // look ahead in the direction you face (lookX) and down while falling (lookY)
+    clamp(P.x + P.w / 2 - VIEW_W * 0.5 + L.lookX, 0, L.cols * TILE - VIEW_W),
+    clamp(P.y + P.h / 2 - VIEW_H * 0.55 + L.lookY, 0, L.rows * TILE - VIEW_H),
   ];
 }
 function snapCamera() { [L.cam, L.camY] = cameraTarget(); }
@@ -541,12 +432,14 @@ function inFoam() {
 function breakTile(tx, ty) {
   L.grid[ty][tx] = ' ';
   const col = L.def.theme.debris === 'mucus' ? '#c7d36a' : '#a08f78';
-  burst(tx * TILE + 16, ty * TILE + 16, col, 14, 3.2, 0.15, 34);
+  burst(tx * TILE + 16, ty * TILE + 16, col, 8, 3.2, 0.15, 34);
+  shards(tx * TILE + 16, ty * TILE + 16, col, 9);
   L.points += 20; G.shake = Math.max(G.shake, 3);
   AUDIO.play('breakb');
 }
 function bumpTile(tx, ty) {
   const c = tileAt(tx, ty);
+  if (c === 'R' || c === 'U') L.bumps.set(ty * L.cols + tx, 10);   // the block hops up
   if (c === 'B') breakTile(tx, ty);
   else if (c === 'R') {
     L.grid[ty][tx] = 'U';
@@ -554,7 +447,8 @@ function bumpTile(tx, ty) {
     L.ents.push({ type: item, tx, ty: ty - 1, x: tx * TILE, y: ty * TILE, alive: true, t: 0, pop: TILE, fromRibo: true, vx: (P.face || 1) * 1.3, vy: 0 });
     burst(tx * TILE + 16, ty * TILE, '#ffe9a8', 10, 2.2);
     AUDIO.play('ribo');
-    once('ribo', 'The ribosome translated an mRNA: a new protein pops out!');
+    tagOnce('ribo', 'TRANSLATED · A NEW PROTEIN!', '#ffe9a8');
+    meet('ribosome');
   } else AUDIO.play('move');
 }
 
@@ -634,19 +528,30 @@ function killEnemy(e) {
   const b = enemyBox(e);
   e.alive = false;
   if (e.type !== 'rosb') L.kills++;   // a radical is not a P. aeruginosa product or cell
-  else once('rosstomp', 'Superoxide neutralised. Antioxidant enzymes do this inside real cells.');
   announceKill(e.type, b.x + b.w / 2, b.y);
   gain(200, b.x + b.w / 2, b.y, '#ff8a96');
   flash(b.x + b.w / 2, b.y + b.h / 2, 20);
   burst(b.x + b.w / 2, b.y + b.h / 2, ENEMY_COL[e.type] || '#b8404c', 16, 3.2);
+  ring(b.x + b.w / 2, b.y + b.h / 2, 6, 48, '#ffffff', 16, 3);
   G.shake = Math.max(G.shake, 5); G.hitStop = 3; AUDIO.play('stomp');
+  codexSee(e.type);
+}
+// Stomping several enemies without touching the ground: DOUBLE! TRIPLE! ...
+const CHAIN_WORDS = ['', '', 'DOUBLE!', 'TRIPLE!', 'QUADRUPLE!', 'MEGA CHAIN!'];
+function stompChain() {
+  P.chain = (P.chain || 0) + 1;
+  if (P.chain < 2) return;
+  const bonus = 100 * P.chain;
+  L.points += bonus;
+  bigText(`${CHAIN_WORDS[Math.min(P.chain, 5)]} +${bonus}`, P.x + P.w / 2, P.y - 30, ['#ffe27a', '#ffb36b', '#ff8ad0', '#9fe7ff'][P.chain % 4]);
+  AUDIO.play('chain', P.chain);
 }
 // A quick white flash (impact), drawn as a fading particle.
 function flash(x, y, r) { L.fx.push({ x, y, vx: 0, vy: 0, grav: 0, life: 9, max: 9, color: 'rgba(255,255,255,0.9)', r }); }
 function enemyContact(e, msg, kind = 'enemy') {
   const b = enemyBox(e);
   if (!overlap(P, b)) return;
-  if (P.vy > 0 && P.y + P.h - P.vy <= b.y + 8) { killEnemy(e); P.vy = JUMP_V * 0.7; P.sprung = false; P.squash = 0.32; }
+  if (P.vy > 0 && P.y + P.h - P.vy <= b.y + 8) { killEnemy(e); P.vy = JUMP_V * 0.7; P.sprung = false; P.squash = 0.32; stompChain(); }
   else hurt(kind, msg);
 }
 
@@ -720,7 +625,7 @@ function updateBoss(e, pcx) {
   if (overlap(P, b)) {
     if (P.vy > 0 && P.y + P.h - P.vy <= b.y + 14) {
       P.vy = JUMP_V * 0.85; P.sprung = false; P.squash = 0.32;
-      if (e.open > 0.6) damageBoss(e, 2);
+      if (e.open > 0.6) { damageBoss(e, 2); stompChain(); }
       else { AUDIO.play('boing'); once('shell', 'The alginate shell is too tough to stomp. Wait until it opens, or shoot it!'); }
     } else hurt('enemy', 'The mucoid colony crashed into you.');
   }
@@ -872,7 +777,8 @@ function burst(x, y, color, n = 10, speed = 3, grav = 0.08, life = 32) {
   }
 }
 function updateFx() {
-  for (const p of L.fx) { p.x += p.vx; p.y += p.vy; p.vy += p.grav; if (p.grav) p.vx *= 0.95; p.life--; }
+  for (const p of L.fx) { p.x += p.vx; p.y += p.vy; p.vy += p.grav; if (p.grav) p.vx *= 0.95; if (p.vr) p.rot += p.vr; p.life--; }
+  for (const [k, v] of L.bumps) { if (v <= 1) L.bumps.delete(k); else L.bumps.set(k, v - 1); }
   if (L.fx.length) L.fx = L.fx.filter(p => p.life > 0);
   for (const p of L.pops) { p.y -= 0.7; p.life--; }
   if (L.pops.length) L.pops = L.pops.filter(p => p.life > 0);
@@ -889,15 +795,42 @@ function gain(base, x, y, color) {
   const m = Math.min(L.combo, 5), pts = base * m;
   L.points += pts;
   L.pops.push({ x, y: y - 8, text: m > 1 ? `+${pts} x${m}` : `+${pts}`, color, life: 50 });
+  P.happy = Math.max(P.happy || 0, 30);
   return m;
 }
 
 // ---- damage ----------------------------------------------------------------------
-function loseReplicate(msg) {
-  if (L.difficulty === 0) { toast('Study run: replicates protected. ' + msg); return; }
-  P.reps--; P.repFlash = 50;
-  toast(P.reps > 0 ? `${msg}  Replicates left: ${P.reps}/3` : msg);
-  if (P.reps <= 0) { setState('gameOver'); AUDIO.play('fail'); }
+// The explaining message appears the first time per kind of damage; after that the
+// label above the cell ("ROS HIT") is enough.
+function loseReplicate(msg, quiet = false) {
+  if (L.difficulty === 0) { if (!quiet) toast('Study run: replicates protected. ' + msg); return; }
+  P.reps--; P.repFlash = 50; G.deaths++;
+  if (!quiet || P.reps <= 0) toast(P.reps > 0 ? `${msg}  Replicates left: ${P.reps}/${L.maxReps}` : msg, 170);
+  if (P.reps <= 0) {
+    if (G.mode === 'log') finishLogPhase(false);
+    else startLysis();
+  }
+}
+// n = 0: the cell bursts, the world slows for a moment, then the part restarts by
+// itself (no panel to click through). R restores the last stock instead.
+function startLysis() {
+  G.lysisT = 0;
+  const cx = P.x + P.w / 2, cy = P.y + P.h / 2;
+  burst(cx, cy, '#f3c22f', 34, 5, 0.12, 50); burst(cx, cy, '#fff5c4', 18, 3, 0.05, 40);
+  ring(cx, cy, 8, 90, '#ffe27a', 30, 4); ring(cx, cy, 4, 50, '#ffffff', 20, 2);
+  G.shake = 14; AUDIO.play('lysis'); AUDIO.play('fail');
+  setState('lysis');
+}
+function finishLysis() {
+  G.failReason = '';
+  if (G.mode === 'daily') { endAttempt('lost'); startDaily(false); return; }
+  if (L.stage > 0) { restartPart(); return; }
+  endAttempt('lost');
+  const keep = L.attempts;
+  loadLevel(G.levelIdx, { keepDeaths: true });
+  L.attempts = keep;
+  setState('play');
+  toast('n = 0 · restarted. Protect your replicates!', 140);
 }
 function hurt(kind, msg) {
   if (P.inv > 0) return;
@@ -918,10 +851,13 @@ function hurt(kind, msg) {
     return;
   }
   P.inv = L.difficulty > 100 ? 45 : 90 + Math.round(180 * (1 - L.difficulty / 100)); P.vy = -6; P.vx = -P.face * 3; P.dizzy = 80; P.damageT = 75;
-  P.damageLabel = ({ ros: 'ROS HIT', hcn: 'HCN HIT', foam: 'MEMBRANE HIT', enemy: 'CELL WALL HIT' })[kind] || 'REPLICATE LOST';
+  P.damageLabel = ({ ros: 'ROS HIT', hcn: 'HCN HIT', foam: 'MEMBRANE HIT', enemy: 'CELL WALL HIT', front: 'MEDIUM DEPLETED', ab: 'ANTIBIOTIC HIT' })[kind] || 'REPLICATE LOST';
   burst(P.x + P.w / 2, P.y + P.h / 2, '#e0465a', 12, 3);
+  ring(P.x + P.w / 2, P.y + P.h / 2, 6, 34, '#ff6b7a', 14, 2.5);
   G.shake = 10; AUDIO.play('hurt');
-  loseReplicate(msg);
+  const quiet = !!G.seen['hurt:' + kind + msg];
+  G.seen['hurt:' + kind + msg] = true;
+  loseReplicate(msg, quiet);
 }
 function respawn() {
   P.x = L.respawn.x; P.y = L.respawn.y; P.vx = 0; P.vy = 0; P.inv = 60; P.slow = 0; P.ride = null;
@@ -930,8 +866,10 @@ function respawn() {
 
 // ---- the main play update --------------------------------------------------------
 function updatePlay() {
-  const S = STRAINS[G.strain];
+  const S = STRAINS[G.strain], M = L.mods;
+  const dj = M.grounded ? 0 : S.doubleJump;   // the daily "Grounded" rule
   L.time++;
+  if (M.magnet) P.magnet = Math.max(P.magnet, 2);
   if (took('retry')) { retryCheckpoint(); return; }
   if (P.dashCool > 0) P.dashCool--;
   if (P.shootFlash > 0) P.shootFlash--;
@@ -965,7 +903,7 @@ function updatePlay() {
   const jumpF = (P.slow > 0 ? 0.85 : 1) * (P.sticky ? 0.8 : 1);
   const dir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
   if (dir) { P.vx += dir * RUN_ACC; P.face = dir; } else P.vx *= FRICTION;
-  P.vx = clamp(P.vx, -RUN_MAX * slowF, RUN_MAX * slowF);
+  P.vx = clamp(P.vx, -RUN_MAX * M.run * slowF, RUN_MAX * M.run * slowF);
   if (P.dash > 0) { P.vx = P.face * 9 * slowF; P.dash--; }
   if (Math.abs(P.vx) < 0.05) P.vx = 0;
 
@@ -973,7 +911,8 @@ function updatePlay() {
   if (took('jump')) P.buffer = BUFFER + Math.round(6 * Math.max(0, 1 - L.difficulty / 100)); else if (P.buffer > 0) P.buffer--;
   if (P.onGround) {
     P.coyote = COYOTE + Math.round(12 * Math.max(0, 1 - L.difficulty / 100)); P.groundT++; P.glide = 60;
-    if (S.doubleJump > 0 && P.groundT >= S.recharge) P.djReady = true;
+    if (dj > 0 && P.groundT >= S.recharge) P.djReady = true;
+    P.chain = 0;   // a stomp chain ends when you land
   } else { P.coyote--; P.groundT = 0; }
 
   if (P.buffer > 0) {
@@ -981,25 +920,27 @@ function updatePlay() {
       P.vy = JUMP_V * jumpF;
       P.coyote = 0; P.buffer = 0; P.squash = -0.22; P.ride = null;
       AUDIO.play('jump');
-    } else if (S.doubleJump > 0 && P.djReady) {
-      P.vy = JUMP_V * S.doubleJump * jumpF; P.sprung = false;
+    } else if (dj > 0 && P.djReady) {
+      P.vy = JUMP_V * dj * jumpF; P.sprung = false;
       P.djReady = false; P.buffer = 0; P.phos = 30; P.squash = -0.18;   // little "P" badge = phosphorylated
+      P.spin = 18;   // a quick roll in the air
       burst(P.x + P.w / 2, P.y + P.h, '#b98ae6', 8, 2, 0.05, 22);
+      ring(P.x + P.w / 2, P.y + P.h, 4, 26, '#d7b8f5', 14, 2);
       AUDIO.play('dj');
-    } else if (S.doubleJump === 0 && !P.onGround) {
-      once('nodj', 'stk trades its double jump for a ground dash. Press C on a floor to dash through debris.');
+    } else if (dj === 0 && !P.onGround) {
+      tagOnce('nodj', M.grounded ? 'GROUNDED TODAY · NO DOUBLE JUMP' : 'NO DOUBLE JUMP · C = GROUND DASH', '#ffcf70');
     }
   }
   if (!keys.jump && !P.sprung && P.vy < -3.5) P.vy = -3.5;   // let go early = lower jump (not after a bounce)
-  P.vy = Math.min(P.vy + GRAV, MAX_FALL);
-  if (G.strain === 'stp' && keys.jump && P.vy > 0 && P.glide > 0) { P.vy = Math.min(P.vy, 2.4); P.glide--; }
+  P.vy = Math.min(P.vy + GRAV * M.grav, MAX_FALL);
+  if (G.strain === 'stp' && !M.grounded && keys.jump && P.vy > 0 && P.glide > 0) { P.vy = Math.min(P.vy, 2.4); P.glide--; }
   if (P.vy >= 0) P.sprung = false;
 
   // Shoot PSMs.
   if (P.shootCool > 0) P.shootCool--;
   if (took('shoot')) {
     if (P.ammo > 0 && P.shootCool === 0) { shoot(); P.shootFlash = 10; }
-    else if (P.ammo === 0) once('noammo', 'No PSMs left. Jump into a ribosome block from below to make more.');
+    else if (P.ammo === 0) tagOnce('noammo', 'NO PSMs · BUMP A RIBOSOME BLOCK', '#f3b6e2');
   }
 
   // Cilia beat and carry you along.
@@ -1011,6 +952,10 @@ function updatePlay() {
   if (P.onGround && !wasGround && fallV > 4) {
     P.squash = Math.min(0.3, fallV / 32);
     burst(P.x + P.w / 2, P.y + P.h, rgba(L.def.theme.eps, 0.9), 6, 1.6, -0.02, 26);
+    if (fallV > 9) {   // a hard landing: a ring of dust and a thud
+      ring(P.x + P.w / 2, P.y + P.h, 6, 40, rgba(L.def.theme.eps, 0.9), 16, 3);
+      G.shake = Math.max(G.shake, 2.5); AUDIO.play('land');
+    }
     // mucus jiggles where you land
     const ty = Math.floor((P.y + P.h + 1) / TILE), tx = Math.floor((P.x + P.w / 2) / TILE);
     for (let x = tx - 2; x <= tx + 2; x++) if (tileAt(x, ty) === '~') L.jiggle.set(ty * L.cols + x, Math.min(6, fallV * 0.6) * (1 - Math.abs(x - tx) * 0.25));
@@ -1028,10 +973,10 @@ function updatePlay() {
   P.sticky = 0; P.belt = 0;
   if (P.onGround && !P.ride) {
     const c = tileAt(Math.floor((P.x + P.w / 2) / TILE), Math.floor((P.y + P.h + 1) / TILE));
-    if (c === '~') { P.sticky = 1; once('mucus', 'Thick CF mucus: you are slow and cannot jump as high.'); }
+    if (c === '~') { P.sticky = 1; tagOnce('mucus', 'STICKY MUCUS · SLOW, LOW JUMPS', '#eef0a0'); }
     else if (c === '<') P.belt = -1.5;
     else if (c === '>') P.belt = 1.5;
-    if (P.belt) once('belt', L.def.theme.bg === 'cf' ? 'Beating cilia carry you along. Run against them, or jump off.' : 'A flow channel carries you along. Run against it, or jump off.');
+    if (P.belt) tagOnce('belt', L.def.theme.bg === 'cf' ? 'CILIA CARRY YOU · RUN OR JUMP OFF' : 'FLOW CHANNEL · RUN OR JUMP OFF', '#cfe8ff');
   }
 
   for (const t of ['inv', 'slow', 'shield', 'magnet', 'phos', 'gold', 'repFlash', 'dizzy', 'damageT']) if (P[t] > 0) P[t]--;
@@ -1041,15 +986,25 @@ function updatePlay() {
   if (P.y > L.rows * TILE + 64) {
     P.inv = 0;
     G.shake = 8; AUDIO.play('hurt');
-    loseReplicate('You fell out of the culture.');
+    loseReplicate('You fell out of the culture.', !!G.seen.fell);
+    G.seen.fell = true;
     if (G.state !== 'play') return;
+    endAttempt('lost');
     respawn();
+    newAttempt();
   }
 
   recordRun();
   updateEntities();
+  if (G.state !== 'play') return;
+  if (L.def.endless) { updateLogPhase(); if (G.state !== 'play') return; }
   updateShots();
   updateFx();
+  updateLabels();
+  updateFlyers();
+  updateGaze();
+  if (P.scared && nearFoamTile()) meet('foam');
+  updateLook();
   followCamera();
   pressed.down = false; pressed.up = false;
   // tunnels: darker around a light on your cell, muffled music
@@ -1087,11 +1042,11 @@ function updateEntities() {
     if (e.pop > 0) { e.y -= 2; e.pop -= 2; }     // a protein coming out of a ribosome block...
     else if (e.fromRibo) {                         // ...then it slides off and drops to the floor
       const nx = e.x + e.vx, fy = Math.floor((e.y + 16) / TILE);
-      if (isSolid(tileAt(Math.floor((e.vx > 0 ? nx + 28 : nx + 4) / TILE), fy))) e.vx = -e.vx; else e.x = nx;
+      if (enemySolid(tileAt(Math.floor((e.vx > 0 ? nx + 28 : nx + 4) / TILE), fy))) e.vx = -e.vx; else e.x = nx;
       e.vy = Math.min(e.vy + 0.3, 7);
       const prevB = e.y + TILE; e.y += e.vy;
       const R = Math.floor((e.y + TILE) / TILE), c = tileAt(Math.floor((e.x + 16) / TILE), R);
-      if (e.vy > 0 && (isSolid(c) || oneWay(c)) && prevB <= R * TILE + 1) { e.y = R * TILE - TILE; e.vy = 0; }
+      if (e.vy > 0 && (enemySolid(c) || oneWay(c)) && prevB <= R * TILE + 1) { e.y = R * TILE - TILE; e.vy = 0; }
       if (e.y > L.rows * TILE) e.alive = false;
     }
     const cx = e.x + 16, cy = e.y + 16;
@@ -1100,23 +1055,37 @@ function updateEntities() {
         if (dist(cx, cy, pcx, pcy) < 24) {
           e.alive = false; L.peptides++;
           gain(300, cx, cy, '#9fe7ff');
-          burst(cx, cy, '#9fe7ff', 18, 3);
+          burst(cx, cy, '#9fe7ff', 18, 3); ring(cx, cy, 6, 44, '#9fe7ff', 20);
+          flyToHud('score', cx, cy);
           AUDIO.play('peptide');
-          toast(`Tryptic peptide ${L.peptides}/${L.totalPep} found! The MS identifies proteins from peptides like this.`, 170);
+          tag(`PEPTIDE ${L.peptides}/${L.totalPep}`, cx, cy - 24, '#9fe7ff', 130);
+          meet('peptide'); codexPeptide(e);
         }
         break;
       case 'psm':
         if (dist(cx, cy, pcx, pcy) < 26) {
           e.alive = false; P.ammo = Math.min(MAX_AMMO, P.ammo + 12);
-          burst(cx, cy, '#e88ad0', 14, 3); AUDIO.play('power');
-          toast('PSMs (phenol-soluble modulins), small peptide toxins of S. aureus: press X, K or Shift to shoot them.', 220);
+          burst(cx, cy, '#e88ad0', 14, 3); AUDIO.play('power'); P.happy = 40;
+          tag(G.seen.psm ? '+12 PSM' : '+12 PSM · X / K / SHIFT TO SHOOT', cx, cy - 24, '#f3b6e2', 170);
+          G.seen.psm = true; meet('psm');
         }
         break;
       case 'xan':
         if (dist(cx, cy, pcx, pcy) < 26) {
           e.alive = false; P.gold = 60 * 12;
-          burst(cx, cy, '#ffd84a', 18, 3.4); AUDIO.play('power');
-          toast('Staphyloxanthin: the golden carotenoid of S. aureus is an antioxidant. ROS cannot hurt you for 12 s.', 220);
+          burst(cx, cy, '#ffd84a', 18, 3.4); AUDIO.play('power'); P.happy = 40;
+          tag('STAPHYLOXANTHIN · ROS-PROOF 12 s', cx, cy - 24, '#ffd84a', 160);
+          meet('xan');
+        }
+        break;
+      case 'secret':   // a golden cluster in a hidden room
+        if (dist(cx, cy, pcx, pcy) < 28) {
+          e.alive = false; L.points += 1000; L.secret = true; P.happy = 60;
+          burst(cx, cy, '#ffe066', 30, 4); ring(cx, cy, 8, 80, '#ffe066', 28, 4); ring(cx, cy, 4, 50, '#ffffff', 20, 2);
+          flyToHud('score', cx, cy);
+          bigText('SECRET FOUND!', cx, cy - 30, '#ffe066', 90);
+          AUDIO.play('secret'); G.shake = Math.max(G.shake, 4);
+          meet('secret'); codexSecret();
         }
         break;
       case 'spring': // a swollen cell: land on it and it throws you up
@@ -1125,17 +1094,17 @@ function updateEntities() {
           P.y = e.y + 14 - P.h; P.vy = SPRING_V; P.onGround = false; P.coyote = 0; P.ride = null; P.sprung = true;
           P.squash = -0.3; e.sq = 14;
           AUDIO.play('boing');
-          once('spring', 'Boing! A swollen cell throws you up.');
+          tagOnce('spring', 'BOING!', '#ffe9c4');
         }
         break;
       case 'omv': { // outer membrane vesicle: bounces along
         e.vy = Math.min(e.vy + 0.35, 9);
         const nx = e.x + e.vx;
-        if (isSolid(tileAt(Math.floor((e.vx > 0 ? nx + 27 : nx + 5) / TILE), Math.floor((e.y + 16) / TILE)))) e.vx = -e.vx; else e.x = nx;
+        if (enemySolid(tileAt(Math.floor((e.vx > 0 ? nx + 27 : nx + 5) / TILE), Math.floor((e.y + 16) / TILE)))) e.vx = -e.vx; else e.x = nx;
         const prevB = e.y + 27;
         e.y += e.vy;
         const col = Math.floor((e.x + 16) / TILE), R = Math.floor((e.y + 27) / TILE), c = tileAt(col, R);
-        if (e.vy > 0 && (isSolid(c) || oneWay(c)) && prevB <= R * TILE + 1) { e.y = R * TILE - 27; e.vy = -7.2; }
+        if (e.vy > 0 && (enemySolid(c) || oneWay(c)) && prevB <= R * TILE + 1) { e.y = R * TILE - 27; e.vy = -7.2; }
         if (e.vy < 0 && isSolid(tileAt(col, Math.floor((e.y + 5) / TILE)))) e.vy = 1;
         if (e.y > L.rows * TILE) e.alive = false;
         enemyContact(e, 'An outer membrane vesicle (OMV) of P. aeruginosa delivered its cargo into you.');
@@ -1159,13 +1128,13 @@ function updateEntities() {
           spawnEnemy('rosb', cx + e.face * 20, cy - 4, { vx: e.face * 3.2 });
           burst(cx + e.face * 18, cy - 4, '#ffb36b', 8, 2, 0, 16);
           AUDIO.play('shoot');
-          once('rosgun', 'Superoxide (O₂•⁻)! Pyocyanin redox cycling makes these ROS. Jump over them, stomp them, or shoot them.');
+          if (!G.seen.rosgun) { G.seen.rosgun = true; tag('SUPEROXIDE! JUMP, STOMP OR SHOOT', cx, cy - 30, '#ffb36b', 170); }
         }
         break;
       }
       case 'rosb': { // a superoxide radical flying straight ahead
         e.x += e.vx;
-        if (isSolid(tileAt(Math.floor((e.x + 16 + Math.sign(e.vx) * 14) / TILE), Math.floor((e.y + 16) / TILE))) || e.t > 420) {
+        if (enemySolid(tileAt(Math.floor((e.x + 16 + Math.sign(e.vx) * 14) / TILE), Math.floor((e.y + 16) / TILE))) || e.t > 420) {
           e.alive = false; burst(e.x + 16, e.y + 16, '#ff7a3c', 10, 2.2, 0.05, 20); break;
         }
         enemyContact(e, 'A superoxide radical (ROS) hit you.', 'ros');
@@ -1179,12 +1148,14 @@ function updateEntities() {
       case 'hcn': { // a vent that puffs hydrogen cyanide now and then
         const ph = e.t % 220;
         e.warn = ph > 110 && ph <= 140; e.active = ph > 140;
+        if (e.warn && dist(cx, cy, pcx, pcy) < 260) meet('hcn');
         if (e.active && overlap(P, { x: e.x - 18, y: e.y - 60, w: 68, h: 92 })) hurt('hcn', 'HCN (hydrogen cyanide) blocked your respiration.');
         break;
       }
       case 'geyser': { // rhamnolipid foam that wells up in a column, with a bubbling warning first
         const s = foamGeyserState(e);
         e.warn = s.warn; e.active = s.height > 0;
+        if (e.warn && dist(cx, cy, pcx, pcy) < 220) meet('foam');
         if (e.active && overlap(P, { x: e.x + 5, y: e.y + TILE - s.height, w: 22, h: s.height })) hurt('foam', 'A column of rhamnolipid foam damaged your membrane.');
         break;
       }
@@ -1210,7 +1181,7 @@ function updateEntities() {
           const nx = e.x + e.dir * 2.6, front = e.dir > 0 ? nx + 30 : nx + 2;
           const ftx = Math.floor(front / TILE), fty = Math.floor((e.y + 31) / TILE);
           const ahead = tileAt(ftx, fty), below = tileAt(ftx, fty + 1);
-          if (isSolid(ahead) || ahead === '^' || !(isSolid(below) || oneWay(below))) e.dir = -e.dir; else e.x = nx;
+          if (enemySolid(ahead) || ahead === '^' || !(enemySolid(below) || oneWay(below))) e.dir = -e.dir; else e.x = nx;
         }
         enemyContact(e, 'A twitching P. aeruginosa cell pulled itself into you.');
         break;
@@ -1224,7 +1195,8 @@ function updateEntities() {
           e.alive = false; L.cystine++;
           AUDIO.play('cys', gain(100, cx, cy, '#ffe36a'));
           burst(cx, cy, '#f5d33a', 12, 2.6);
-          once('cys', 'L-cystine! A source of sulfur for the cell.');
+          flyToHud('cys', cx, cy);
+          meet('cystine');
         }
         break;
       case 'iron':
@@ -1232,32 +1204,44 @@ function updateEntities() {
           e.alive = false; L.ironTotal++; L.ironBank++;
           AUDIO.play('iron', gain(50, cx, cy, '#ff9a62'));
           burst(cx, cy, '#e0743c', 12, 2.6);
+          flyToHud('iron', cx, cy);
+          meet('iron');
           if (L.ironBank >= 3) {
             L.ironBank = 0;
-            if (P.reps < 3) { P.reps++; toast('3 Fe: one replicate restored!'); }
-            else { L.points += 300; toast('3 Fe with all replicates: +300 points'); }
+            if (P.reps < L.maxReps) { P.reps++; P.repFlash = 0; tag('3 Fe · +1 REPLICATE', pcx, pcy - 30, '#9be89f', 150); ring(pcx, pcy, 6, 50, '#9be89f', 22); }
+            else { L.points += 300; tag('3 Fe · +300', pcx, pcy - 30, '#ffb27a', 120); }
           }
         }
         break;
       case 'ahpc':
-        if (dist(cx, cy, pcx, pcy) < 26) { e.alive = false; P.shield = 60 * 20; burst(cx, cy, '#7fb6ff', 14, 3); AUDIO.play('power'); toast('AhpC shield: blocks one ROS hit (20 s).'); }
+        if (dist(cx, cy, pcx, pcy) < 26) {
+          e.alive = false; P.shield = 60 * 20; burst(cx, cy, '#7fb6ff', 14, 3); AUDIO.play('power'); P.happy = 40;
+          tag('AhpC SHIELD · BLOCKS ONE ROS HIT', cx, cy - 24, '#9cc6ff', 150); meet('ahpc');
+        }
         break;
       case 'tcya':
-        if (dist(cx, cy, pcx, pcy) < 26) { e.alive = false; P.magnet = 60 * 12; burst(cx, cy, '#f0c850', 14, 3); AUDIO.play('power'); toast('TcyA: cystine is pulled towards you (12 s).'); }
+        if (dist(cx, cy, pcx, pcy) < 26) {
+          e.alive = false; P.magnet = 60 * 12; burst(cx, cy, '#f0c850', 14, 3); AUDIO.play('power'); P.happy = 40;
+          tag('TcyA · CYSTINE MAGNET 12 s', cx, cy - 24, '#f0c850', 150); meet('tcya');
+        }
         break;
       case 'check':
+        if (e.on && e.fillT !== undefined && e.fillT < 30) e.fillT++;
         if (!e.on && Math.abs(cx - pcx) < 20 && Math.abs(cy - pcy) < 40) {
           for (const o of L.ents) if (o.type === 'check') o.on = false;
-          e.on = true; L.respawn = { x: e.x + 4, y: e.y + 4 };
+          e.on = true; e.fillT = 0; L.respawn = { x: e.x + 4, y: e.y + 4 };
           if (!e.saved) { e.saved = true; L.stocks++; }
-          burst(cx, cy, '#bfe6ff', 14, 2.4, -0.03);
+          burst(cx, cy, '#bfe6ff', 14, 2.4, -0.03); ring(cx, cy, 6, 46, '#bfe6ff', 22);
           AUDIO.play('check');
-          toast('Glycerol stock saved: you will restart here.', 140);
+          tag('STOCK SAVED', cx, cy - 34, '#bfe6ff', 110);
           captureCheckpoint();
         }
         break;
       case 'stage': // the gate to part 2: a checkpoint that moves the run on
-        if (overlap(P, { x: e.x, y: e.y - TILE, w: TILE * 2, h: TILE * 2 })) { enterStage(L.stage + 1); return; }
+        if (overlap(P, { x: e.x, y: e.y - TILE, w: TILE * 2, h: TILE * 2 })) {
+          if (G.mode === 'daily') { finishLevel(); return; }   // a daily challenge is one part only
+          enterStage(L.stage + 1); return;
+        }
         break;
       case 'goal': {
         const box = { x: e.x, y: e.y - TILE, w: TILE * 2, h: TILE * 2 };
@@ -1275,6 +1259,7 @@ function updateEntities() {
         // Wait until the player is near, then drop pyocyanin every ~1.6 s.
         if (Math.abs(cx - pcx) < VIEW_W * 0.7 && Math.abs(cy - pcy) < VIEW_H && e.t % (e.exposed ? 60 : 80) === 0) {
           spawned.push({ type: 'drop', x: e.x + 12, y: e.y + 26, vy: 0, alive: true, t: 0 });
+          meet('drop');
         }
         break;
       case 'drop': {
@@ -1294,7 +1279,7 @@ function updateEntities() {
       case 'hqno': {
         e.cx = cx + Math.sin(e.t * 0.02) * 70; e.cy = cy + Math.sin(e.t * 0.031) * 22;
         if (dist(e.cx, e.cy, pcx, pcy) < 46) {
-          if (P.slow === 0) once('hqno', 'HQNO blocks respiration: slower and weaker jumps for a few seconds.');
+          if (P.slow === 0) { tagOnce('hqno', 'HQNO · SLOWER, WEAKER JUMPS', '#c9e59a'); meet('hqno'); }
           P.slow = 150;
         }
         break;
@@ -1303,12 +1288,21 @@ function updateEntities() {
         // Patrol; charge when the player is close on the same level. Turn at walls, ledges, foam.
         const ex = e.x + e.w / 2, ey = e.y + e.h / 2;
         e.angry = Math.abs(pcy - ey) < 30 && Math.abs(pcx - ex) < 190 && P.inv === 0;
+        // it winds up for a moment before it charges (a fair warning)
+        if (e.angry && !e.wasAngry) e.windup = 14;
+        e.wasAngry = e.angry;
+        if (e.windup > 0) {
+          e.windup--;
+          e.vx = (Math.sign(pcx - ex) || 1) * 0.01;
+          enemyContact(e, 'LasA protease cut into your cell wall.');
+          break;
+        }
         e.vx = e.angry ? (Math.sign(pcx - ex) || 1) * 2.7 : Math.sign(e.vx) * 1.3;
         const nx = e.x + e.vx;
         const front = e.vx < 0 ? nx : nx + e.w;
         const ftx = Math.floor(front / TILE), fty = Math.floor((e.y + e.h - 1) / TILE);
         const ahead = tileAt(ftx, fty), below = tileAt(ftx, fty + 1);
-        if (isSolid(ahead) || ahead === '^' || !(isSolid(below) || oneWay(below))) e.vx = -e.vx; else e.x = nx;
+        if (enemySolid(ahead) || ahead === '^' || !(enemySolid(below) || oneWay(below))) e.vx = -e.vx; else e.x = nx;
         enemyContact(e, 'LasA protease cut into your cell wall.');
         break;
       }
@@ -1331,7 +1325,7 @@ function updateEntities() {
         if (target && dist(target.x + 16, target.y + 16, e.cx, e.cy) < 14) {
           target.alive = false;
           burst(e.cx, e.cy, '#c8e85a', 10, 2);
-          once('sidero', 'A siderophore grabbed that iron. Competition for Fe!');
+          if (!G.seen.sidero) { G.seen.sidero = true; tag('IRON GRABBED · COMPETITION FOR Fe', e.cx, e.cy - 26, '#c8e85a', 160); }
         }
         if (e.cool === 0 && dist(e.cx, e.cy, pcx, pcy) < 26) {
           e.cool = 120;
@@ -1349,6 +1343,9 @@ function updateEntities() {
 }
 
 function finishLevel() {
+  endAttempt('clear');
+  if (G.mode === 'daily') { finishDaily(); return; }
+  if (G.mode === 'log') { finishLogPhase(true); return; }
   const timeBonus = L.timeLimit ? Math.max(0, Math.round((L.timeLimit - L.time / 60) * 20)) : 0;
   const repBonus = P.reps * 500;
   const total = L.points + timeBonus + repBonus;
@@ -1358,31 +1355,71 @@ function finishLevel() {
   const starLabels = [L.def.goalKind === 'sputum' ? 'sample delivered' : 'sample measured', ...bonus.map(g => g.short)];
   G.score += total;
   // medal time, and the best time for this level in this browser
-  const secs = L.time / 60, medal = medalFor(L.def, secs), times = loadTimes();
+  const secs = runSecs(), medal = medalFor(L.def, secs), times = loadTimes();
   const prevBest = times[runKey()], newBest = prevBest === undefined || secs < prevBest;
-  if (newBest) { times[runKey()] = secs; saveTimes(times); saveGhost(); }
+  const pbSplits = loadSplits()[runKey()] || [];
+  if (newBest) { times[runKey()] = secs; saveTimes(times); saveGhost(); saveSplits(runKey(), L.splits); }
   G.times = times;
-  G.results[G.levelIdx] = { name: L.def.name, points: L.points, timeBonus, repBonus, total, cystine: L.cystine, totalCys: L.totalCys, iron: L.ironTotal, reps: P.reps, secs, stars, starLabels, kills: L.kills, peptides: L.peptides, totalPep: L.totalPep, medal, best: Math.min(secs, prevBest ?? secs), newBest };
-  setState('levelDone');
+  G.results[G.levelIdx] = {
+    name: L.def.name, points: L.points, timeBonus, repBonus, total, cystine: L.cystine, totalCys: L.totalCys, iron: L.ironTotal, reps: P.reps, secs, stars, starLabels,
+    kills: L.kills, peptides: L.peptides, totalPep: L.totalPep, medal, best: Math.min(secs, prevBest ?? secs), newBest,
+    deaths: G.deaths, splits: L.splits.slice(), pbSplits, secret: !!L.secret,
+    rivalDelta: L.rival ? secs - L.rival.secs : undefined,
+  };
+  G.resultT = 0;
   AUDIO.play('done', G.levelIdx + 1);
+  startReplay(() => { G.resultT = 0; setState('levelDone'); });
 }
 
 // ---- pause menu ------------------------------------------------------------------
-function menuItems() {
-  const items = ['Resume', L.difficulty === 0 ? 'Retry checkpoint (free)' : 'Retry checkpoint (+3 s)', L.stage > 0 ? `Restart part ${L.stage + 1}` : 'Restart level', `Sound effects: ${AUDIO.sfxOn ? 'on' : 'off'}`, `Music: ${AUDIO.musicOn ? 'on' : 'off'}`, 'Main menu'];
-  return items;
+// Each item is [label, action]. Daily and log-phase runs restart instead of retrying.
+function menuEntries() {
+  const entries = [['Resume', 'resume']];
+  if (G.mode === 'daily') entries.push(['Restart daily challenge', 'retry']);
+  else if (G.mode === 'log') entries.push(['New climb', 'retry']);
+  else entries.push([L.difficulty === 0 ? 'Retry checkpoint (free)' : 'Retry checkpoint (+3 s)', 'retry'],
+    [L.stage > 0 ? `Restart part ${L.stage + 1}` : 'Restart level', 'restart']);
+  entries.push([`Sound effects: ${AUDIO.sfxOn ? 'on' : 'off'}`, 'sfx'], [`Music: ${AUDIO.musicOn ? 'on' : 'off'}`, 'music'],
+    ['Codex', 'codex'], ['Main menu', 'menu']);
+  return entries;
 }
-function menuRects() { return menuItems().map((_, i) => ({ x: VIEW_W / 2 - 170, y: (L.difficulty < 100 ? 154 : 158) + i * (L.difficulty < 100 ? 40 : 46), w: 340, h: L.difficulty < 100 ? 36 : 40 })); }
+function menuItems() { return menuEntries().map(e => e[0]); }
+function menuRects() { return menuItems().map((_, i) => ({ x: VIEW_W / 2 - 170, y: 156 + i * 40, w: 340, h: 35 })); }
 function menuSelect() {
   AUDIO.play('click');
-  switch (G.menuIdx) {
-    case 0: setState('play'); break;
-    case 1: retryCheckpoint(); break;
-    case 2: if (L.stage > 0) restartPart(); else { loadLevel(G.levelIdx); setState('intro'); } break;
-    case 3: AUDIO.toggleSfx(); break;
-    case 4: AUDIO.toggleMusic(); break;
-    case 5: G.startLevel = G.levelIdx; setState('title'); break;
+  switch (menuEntries()[G.menuIdx][1]) {
+    case 'resume': setState('play'); break;
+    case 'retry': retryCheckpoint(); break;
+    case 'restart': if (L.stage > 0) restartPart(); else { loadLevel(G.levelIdx); setState('intro'); } break;
+    case 'sfx': AUDIO.toggleSfx(); break;
+    case 'music': AUDIO.toggleMusic(); break;
+    case 'codex': openCodex('paused'); break;
+    case 'menu': G.startLevel = Math.max(0, G.levelIdx); setState('title'); break;
   }
+}
+
+// ---- the title screen: strain cards, level chips and mode chips --------------------
+// Slots 0-3 are the story levels, 4 the daily challenge and 5 the log phase.
+function titleSlot() { return G.titleMode === 'daily' ? 4 : G.titleMode === 'log' ? 5 : G.startLevel; }
+function setTitleSlot(slot) {
+  slot = (slot + 6) % 6;
+  if (slot < 4) { G.titleMode = 'story'; G.startLevel = slot; }
+  else G.titleMode = slot === 4 ? 'daily' : 'log';
+  if (G.titleMode === 'daily') G.strain = dailyChallenge(dayNumber()).strain;
+}
+function updateTitle() {
+  const order = ['anc', 'stk', 'stp'], locked = G.titleMode === 'daily';
+  if (!locked) {
+    if (took('s1')) G.strain = 'anc';
+    if (took('s2')) G.strain = 'stk';
+    if (took('s3')) G.strain = 'stp';
+    if (took('left')) { G.strain = order[(order.indexOf(G.strain) + 2) % 3]; AUDIO.play('move'); }
+    if (took('right')) { G.strain = order[(order.indexOf(G.strain) + 1) % 3]; AUDIO.play('move'); }
+  }
+  if (took('up')) { setTitleSlot(titleSlot() - 1); AUDIO.play('move'); }
+  if (took('down')) { setTitleSlot(titleSlot() + 1); AUDIO.play('move'); }
+  if (took('biology')) { AUDIO.play('click'); openCodex('title'); return; }
+  if (took('confirm')) { AUDIO.play('click'); startGame(); }
 }
 
 // ---- the state machine -----------------------------------------------------------
@@ -1391,19 +1428,10 @@ function update() {
   if (took('mute')) AUDIO.toggleSfx();
   if (took('music')) AUDIO.toggleMusic();
   if (took('ghost')) G.ghostOn = !G.ghostOn;
+  if (took('photo')) saveMicrograph();
   switch (G.state) {
-    case 'title': {
-      const order = ['anc', 'stk', 'stp'];
-      if (took('s1')) G.strain = 'anc';
-      if (took('s2')) G.strain = 'stk';
-      if (took('s3')) G.strain = 'stp';
-      if (took('left')) { G.strain = order[(order.indexOf(G.strain) + 2) % 3]; AUDIO.play('move'); }
-      if (took('right')) { G.strain = order[(order.indexOf(G.strain) + 1) % 3]; AUDIO.play('move'); }
-      if (took('up')) { G.startLevel = (G.startLevel + LEVELS.length - 1) % LEVELS.length; AUDIO.play('move'); }
-      if (took('down')) { G.startLevel = (G.startLevel + 1) % LEVELS.length; AUDIO.play('move'); }
-      if (took('confirm')) { AUDIO.play('click'); startGame(); }
-      break;
-    }
+    case 'title': updateTitle(); break;
+    case 'codex': updateCodex(); break;
     case 'intro':
       if (took('ok') || took('jump')) setState('play');
       break;
@@ -1432,8 +1460,21 @@ function update() {
       if (took('confirm')) menuSelect();
       break;
     }
-    case 'levelDone':
+    case 'lysis':   // n = 0: a short slow-motion burst, then the part restarts by itself
+      G.lysisT++;
+      if (G.lysisT % 2) updateFx();
+      if (G.shake) G.shake *= 0.9;
+      if (took('retry')) { retryCheckpoint(); break; }
+      if (took('pause')) { G.startLevel = Math.max(0, G.levelIdx); setState('title'); break; }
+      if (G.lysisT >= 70 || (G.lysisT > 16 && (took('ok') || took('jump')))) finishLysis();
+      break;
+    case 'replay': updateReplay(); break;
+    case 'levelDone': {
+      const r = G.results[G.levelIdx];
+      updateResultBeats(r);
+      handleShareKeys('level', r);
       if (took('ok') || took('jump')) {
+        if (!resultsDone(r)) { G.resultT = resultTimeline(r).end; break; }   // first press: skip the animation
         if (G.levelIdx + 1 < LEVELS.length) { G.levelIdx++; loadLevel(G.levelIdx); setState('intro'); }
         else {
           if (G.score > G.best) { G.best = G.score; saveBest(G.best); G.newBest = true; } else G.newBest = false;
@@ -1441,16 +1482,28 @@ function update() {
         }
       }
       break;
+    }
+    case 'dailyDone':
+    case 'logDone': {
+      const r = G.state === 'dailyDone' ? G.dailyResult : G.logResult;
+      G.resultT++;
+      handleShareKeys(G.state === 'dailyDone' ? 'daily' : 'endless', r);
+      if (took('retry')) { if (G.state === 'dailyDone') startDaily(false); else startLogPhase(false); break; }
+      if ((took('ok') || took('jump')) && G.resultT > 20) setState('title');
+      break;
+    }
     case 'gameOver':
       if (took('retry')) { retryCheckpoint(); break; }
-      if (took('pause')) { G.startLevel = G.levelIdx; setState('title'); break; }
+      if (took('pause')) { G.startLevel = Math.max(0, G.levelIdx); setState('title'); break; }
       if (took('ok') || took('jump')) {
         G.failReason = '';
-        if (L.stage > 0) restartPart();   // failing in part 2 restarts part 2, not the map
+        if (G.mode === 'daily') startDaily(false);
+        else if (L.stage > 0) restartPart();   // failing in part 2 restarts part 2, not the map
         else { loadLevel(G.levelIdx); setState('intro'); }
       }
       break;
     case 'win':
+      handleShareKeys('win');
       if (took('ok') || took('jump')) setState('title');
       break;
   }
@@ -1714,6 +1767,7 @@ function drawCoccus(cx, cy, r, ring, o = {}) {
   const sq = o.squash || 0, f = o.face || 0;
   ctx.save();
   ctx.translate(cx, cy + r * sq);
+  if (o.rot) ctx.rotate(o.rot);
   ctx.scale(1 + sq, 1 - sq);
   circle(0, 0, r + 3, 'rgba(255,255,244,0.85)');
   circle(0, 0, r + 1.5, '#243442');
@@ -1735,19 +1789,43 @@ function drawCoccus(cx, cy, r, ring, o = {}) {
     circle(Math.cos(a) * (r - 0.5), Math.sin(a) * (r - 0.5), 1.1 * s, 'rgba(255,255,255,0.6)');
   }
   ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.ellipse(-r * 0.4, -r * 0.5, r * 0.3, r * 0.16, -0.5, 0, TAU); ctx.fill();
+  // Face. o.mood: '' | 'happy' | 'scared' | 'effort' | 'hurt'; o.look: [x, y] direction.
+  const mood = o.mood || '', lx = o.look ? o.look[0] * 1.3 : 0, ly = o.look ? o.look[1] * 1.1 : 0;
+  ctx.strokeStyle = '#1d2430'; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   for (const dx of [-4.5, 4.5]) {
-    if (o.blink) {
-      ctx.strokeStyle = '#1d2430'; ctx.lineWidth = 1.6 * s; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo((dx + f * 2.5 - 2.6) * s, -1.6 * s); ctx.lineTo((dx + f * 2.5 + 2.6) * s, -1.6 * s); ctx.stroke();
+    const ex = (dx + f * 2.5) * s, ey = -2 * s;
+    if (mood === 'hurt') {   // x x
+      ctx.lineWidth = 1.5 * s; ctx.beginPath();
+      ctx.moveTo(ex - 2.2 * s, ey - 2.2 * s); ctx.lineTo(ex + 2.2 * s, ey + 2.2 * s);
+      ctx.moveTo(ex + 2.2 * s, ey - 2.2 * s); ctx.lineTo(ex - 2.2 * s, ey + 2.2 * s); ctx.stroke();
+    } else if (mood === 'happy') {   // ^ ^
+      ctx.lineWidth = 1.7 * s; ctx.beginPath(); ctx.arc(ex, ey + 1.4 * s, 2.6 * s, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+    } else if (mood === 'effort') {   // > <
+      ctx.lineWidth = 1.6 * s; ctx.beginPath();
+      const d = dx < 0 ? 1 : -1;
+      ctx.moveTo(ex - 2.4 * s * d, ey - 2 * s); ctx.lineTo(ex + 1.6 * s * d, ey); ctx.lineTo(ex - 2.4 * s * d, ey + 2 * s); ctx.stroke();
+    } else if (o.blink) {
+      ctx.lineWidth = 1.6 * s;
+      ctx.beginPath(); ctx.moveTo(ex - 2.6 * s, -1.6 * s); ctx.lineTo(ex + 2.6 * s, -1.6 * s); ctx.stroke();
     } else {
-      circle((dx + f * 2.5) * s, -2 * s, 3.6 * s, '#ffffff');
-      circle((dx + f * 3.6) * s, -1.6 * s, 1.8 * s, '#1d2430');
-      circle((dx + f * 3.6 - 0.7) * s, -2.4 * s, 0.6 * s, '#ffffff');
+      const big = mood === 'scared' ? 4.4 : 3.6, pupil = mood === 'scared' ? 1.2 : 1.8;
+      circle(ex, ey, big * s, '#ffffff');
+      circle((dx + f * 3.6 + lx) * s, (-1.6 + ly) * s, pupil * s, '#1d2430');
+      circle((dx + f * 3.6 + lx - 0.7) * s, (-2.4 + ly) * s, 0.6 * s, '#ffffff');
     }
   }
-  circle((-7.5 + f * 2) * s, 4 * s, 2.4 * s, 'rgba(235,110,80,0.35)');
-  circle((7.5 + f * 2) * s, 4 * s, 2.4 * s, 'rgba(235,110,80,0.35)');
-  ctx.strokeStyle = '#7a4a08'; ctx.lineWidth = 1.4 * s; ctx.beginPath(); ctx.arc(f * 2 * s, 3.5 * s, 3 * s, 0.2, Math.PI - 0.2); ctx.stroke();
+  circle((-7.5 + f * 2) * s, 4 * s, 2.4 * s, mood === 'happy' ? 'rgba(235,110,80,0.6)' : 'rgba(235,110,80,0.35)');
+  circle((7.5 + f * 2) * s, 4 * s, 2.4 * s, mood === 'happy' ? 'rgba(235,110,80,0.6)' : 'rgba(235,110,80,0.35)');
+  ctx.strokeStyle = '#7a4a08'; ctx.lineWidth = 1.4 * s;
+  if (mood === 'happy') {   // a big open smile
+    ctx.fillStyle = '#7a2e12'; ctx.beginPath(); ctx.arc(f * 2 * s, 3 * s, 3.6 * s, 0, Math.PI); ctx.closePath(); ctx.fill();
+  } else if (mood === 'scared') {   // a small "o"
+    ctx.beginPath(); ctx.arc(f * 2 * s, 5 * s, 1.8 * s, 0, TAU); ctx.stroke();
+  } else if (mood === 'effort' || mood === 'hurt') {   // a wobbly, gritted mouth
+    ctx.beginPath(); ctx.moveTo((f * 2 - 3.5) * s, 5 * s);
+    for (let k = 1; k <= 4; k++) ctx.lineTo((f * 2 - 3.5 + k * 1.75) * s, (5 + (k % 2 ? -1 : 0.6)) * s);
+    ctx.stroke();
+  } else { ctx.beginPath(); ctx.arc(f * 2 * s, 3.5 * s, 3 * s, 0.2, Math.PI - 0.2); ctx.stroke(); }
   ctx.restore();
 }
 // A culture flask (one replicate): golden broth when alive, empty when lost.
@@ -1789,7 +1867,19 @@ function drawIronIcon(x, y, s = 1) {
   ball(x, y, 9 * s, '#ffc29a', '#c65a2c', '#7a2e12');
   if (s >= 0.9) text('Fe', x, y + 4 * s, { size: 10 * s, color: '#fff', align: 'center', weight: '800' });
 }
-// AIP: a cyclic (thiolactone) peptide ring of 5 residues with a short tail.
+// A hidden golden cluster: a game collectible, not a biological structure
+// (the name Staphylococcus aureus refers to golden, grape-like clusters).
+function drawSecret(x, y, t = 0) {
+  glow(x, y, 36 + Math.sin(t * 0.1) * 4, '#ffe066', 0.55);
+  for (const [dx, dy] of [[-9, -6], [0, -9], [9, -6], [-5, 2], [5, 2], [-11, 4], [11, 4], [0, 10]]) {
+    ball(x + dx, y + dy + Math.sin(t * 0.08 + dx) * 0.8, 5.6, '#fffbe0', '#f3c22f', '#a87400');
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+  for (let k = 0; k < 4; k++) {
+    const a = t * 0.05 + k * TAU / 4, sx = x + Math.cos(a) * 20, sy = y + Math.sin(a) * 15, s = 2 + 1.5 * Math.sin(t * 0.2 + k);
+    ctx.beginPath(); ctx.moveTo(sx - s, sy); ctx.lineTo(sx + s, sy); ctx.moveTo(sx, sy - s); ctx.lineTo(sx, sy + s); ctx.stroke();
+  }
+}
 // ---- world drawing ---------------------------------------------------------------
 function drawBackground(th, cx, cy) {
   ctx.fillStyle = L.art.sky; ctx.fillRect(-12, -12, VIEW_W + 24, VIEW_H + 24);
@@ -1955,19 +2045,16 @@ function drawSpecialTiles(cx, cy) {
       }
       return;
     }
+    if (c === 'H') { drawHiddenTile(tx, ty); return; }
     if (c === 'R' || c === 'U') { // ribosome: large + small subunit on an mRNA
-      const used = c === 'U';
-      if (!used) glow(X + 16, Y + 16, 26 + Math.sin(t * 0.1) * 3, '#ffd66a', 0.35);
-      const g = ctx.createLinearGradient(X, Y, X, Y + TILE);
-      g.addColorStop(0, used ? '#b9bcc2' : '#fff1c4'); g.addColorStop(1, used ? '#8b8f96' : '#e9b44c');
-      roundRect(X + 1, Y + 1, 30, 30, 7, g, used ? '#5f636a' : '#94650f', 2);
-      ctx.strokeStyle = used ? '#777' : '#c0392b'; ctx.lineWidth = 1.6; ctx.beginPath();
-      for (let k = 0; k <= 26; k += 2) { const yy = Y + 21 + Math.sin(k * 0.6 + (used ? 0 : t * 0.15)) * 1.5; if (k) ctx.lineTo(X + 3 + k, yy); else ctx.moveTo(X + 3, yy); }
-      ctx.stroke();
-      ball(X + 16, Y + 13, 8.5, used ? '#ddd' : '#cfd6ff', used ? '#9a9ea6' : '#6c7be0', used ? '#5d6168' : '#2f3a8f');
-      ball(X + 16, Y + 23, 5.5, used ? '#ddd' : '#e3e8ff', used ? '#a6aab1' : '#9aa6f0', used ? '#5d6168' : '#4a56b0');
-      if (!used) for (let k = 0; k < 3; k++) circle(X + 22 + k * 3, Y + 7 - k * 2.5 + Math.sin(t * 0.2 + k) * 0.8, 1.8, ['#f3c22f', '#e0743c', '#5aa0ff'][k]);
-    } else if (c === 'B') {
+      const used = c === 'U', hop = L.bumps.get(ty * L.cols + tx) || 0;
+      ctx.save();
+      if (hop) ctx.translate(0, -Math.sin((10 - hop) / 10 * Math.PI) * 8);   // it hops when bumped
+      drawRibosome(X, Y, used, t);
+      ctx.restore();
+      return;
+    }
+    if (c === 'B') {
       if (mucusStyle) { // a mucus plug
         const g = ctx.createRadialGradient(X + 12, Y + 10, 2, X + 16, Y + 16, 22);
         g.addColorStop(0, '#f3f5b8'); g.addColorStop(1, '#93a23a');
@@ -2026,6 +2113,36 @@ function drawSpecialTiles(cx, cy) {
       ctx.globalAlpha = 0.35; text(dir > 0 ? '›' : '‹', X + 16, Y + 24, { size: 14, color: '#7a3443', align: 'center', weight: '900' }); ctx.globalAlpha = 1;
     }
   });
+}
+// A hidden passage: drawn like the biofilm around it, with faint cracks. It fades
+// when the cell comes close, so you can see into the secret room.
+function drawHiddenTile(tx, ty) {
+  const X = tx * TILE, Y = ty * TILE, th = L.def.theme;
+  const d = dist(P.x + P.w / 2, P.y + P.h / 2, X + 16, Y + 16);
+  const a = clamp((d - 40) / 70, 0.22, 1);
+  ctx.save(); ctx.globalAlpha = a;
+  ctx.fillStyle = mix(th.matrix[0], th.matrix[1], clamp(ty / L.rows, 0.15, 0.85)); ctx.fillRect(X, Y, TILE, TILE);
+  for (let k = 0; k < 4; k++) {
+    const px = X + 6 + ((tx * 13 + k * 11) % 20), py = Y + 6 + ((ty * 7 + k * 9) % 20);
+    ball(px, py, 6, mix(th.cells[k % th.cells.length], '#ffffff', 0.4), th.cells[k % th.cells.length], mix(th.cells[0], th.matrix[1], 0.6));
+  }
+  if (ty > 0 && !isSolid(L.grid[ty - 1][tx]) && L.grid[ty - 1][tx] !== 'H') { ctx.fillStyle = rgba(th.eps, 0.9); ctx.fillRect(X, Y - 1, TILE, 6); }
+  ctx.strokeStyle = 'rgba(40,25,10,0.45)'; ctx.lineWidth = 1;   // the tell: hairline cracks
+  ctx.beginPath(); ctx.moveTo(X + 8, Y + 4); ctx.lineTo(X + 14, Y + 13); ctx.lineTo(X + 11, Y + 22); ctx.moveTo(X + 14, Y + 13); ctx.lineTo(X + 23, Y + 17); ctx.stroke();
+  ctx.restore();
+}
+// A ribosome: large + small subunit on an mRNA.
+function drawRibosome(X, Y, used, t) {
+  if (!used) glow(X + 16, Y + 16, 26 + Math.sin(t * 0.1) * 3, '#ffd66a', 0.35);
+  const g = ctx.createLinearGradient(X, Y, X, Y + TILE);
+  g.addColorStop(0, used ? '#b9bcc2' : '#fff1c4'); g.addColorStop(1, used ? '#8b8f96' : '#e9b44c');
+  roundRect(X + 1, Y + 1, 30, 30, 7, g, used ? '#5f636a' : '#94650f', 2);
+  ctx.strokeStyle = used ? '#777' : '#c0392b'; ctx.lineWidth = 1.6; ctx.beginPath();
+  for (let k = 0; k <= 26; k += 2) { const yy = Y + 21 + Math.sin(k * 0.6 + (used ? 0 : t * 0.15)) * 1.5; if (k) ctx.lineTo(X + 3 + k, yy); else ctx.moveTo(X + 3, yy); }
+  ctx.stroke();
+  ball(X + 16, Y + 13, 8.5, used ? '#ddd' : '#cfd6ff', used ? '#9a9ea6' : '#6c7be0', used ? '#5d6168' : '#2f3a8f');
+  ball(X + 16, Y + 23, 5.5, used ? '#ddd' : '#e3e8ff', used ? '#a6aab1' : '#9aa6f0', used ? '#5d6168' : '#4a56b0');
+  if (!used) for (let k = 0; k < 3; k++) circle(X + 22 + k * 3, Y + 7 - k * 2.5 + Math.sin(t * 0.2 + k) * 0.8, 1.8, ['#f3c22f', '#e0743c', '#5aa0ff'][k]);
 }
 
 function drawFoam(cx, cy) {
@@ -2109,10 +2226,18 @@ function drawSignText(cx, cy) {
 function drawEntities(cx, cy) {
   for (const e of L.ents) {
     if (!e.alive || e.type === 'start') continue;
-    const x = e.x, y = e.y;
-    if (e.type !== 'boss' && (x < cx - 140 || x > cx + VIEW_W + 140 || y < cy - 140 || y > cy + VIEW_H + 140)) continue;
-    const bob = Math.sin((e.t + e.tx * 13) * 0.08) * 3;
+    if (e.type !== 'boss' && (e.x < cx - 140 || e.x > cx + VIEW_W + 140 || e.y < cy - 140 || e.y > cy + VIEW_H + 140)) continue;
+    drawEntity(e);
+  }
+  drawShotsAndBubbles();
+}
+// One entity at its world position (also used for the codex icons).
+function drawEntity(e) {
+  const x = e.x, y = e.y;
+  const bob = Math.sin((e.t + e.tx * 13) * 0.08) * 3;
+  {
     switch (e.type) {
+      case 'secret': drawSecret(x + 16, y + 16 + bob, e.t); break;
       case 'landmark': {
         ctx.font = `800 14px ${FONT}`;
         const w = ctx.measureText(e.label).width + 30;
@@ -2163,7 +2288,14 @@ function drawEntities(cx, cy) {
         const X = x + 10, Y = y + 2;
         if (e.on) glow(X + 6, Y + 18, 24, '#9fd8ff', 0.55);
         roundRect(X, Y + 6, 12, 26, [2, 2, 6, 6], 'rgba(235,245,255,0.85)', '#7d93a8', 1.5);
-        roundRect(X + 1.5, Y + 18, 9, 12.5, [0, 0, 5, 5], e.on ? '#f3c22f' : '#c9d2da');
+        // the vial fills with golden culture when the stock is saved
+        const fill = e.on ? Math.min(1, (e.fillT ?? 30) / 30) : 0;
+        roundRect(X + 1.5, Y + 18, 9, 12.5, [0, 0, 5, 5], '#c9d2da');
+        if (fill > 0) {
+          const h = 12.5 * fill;
+          roundRect(X + 1.5, Y + 30.5 - h, 9, h, [0, 0, 5, 5], '#f3c22f');
+          if (fill < 1) for (let k = 0; k < 2; k++) circle(X + 4 + k * 4, Y + 30 - ((e.t * 1.5 + k * 7) % h), 1.2, '#fff6c8');
+        }
         roundRect(X - 2, Y, 16, 8, 2, e.on ? '#2eaa5c' : '#8a96a3');
         ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(X + 2, Y + 9, 2, 18);
         if (e.on) for (let k = 0; k < 3; k++) {
@@ -2254,7 +2386,11 @@ function drawEntities(cx, cy) {
         break;
       }
       case 'lasa': { // a protease with snapping jaws; glows red when it charges
-        const X = x + e.w / 2, Y = y + e.h / 2 + 1, dir = e.vx < 0 ? -1 : 1, open = Math.abs(Math.sin(e.t * (e.angry ? 0.4 : 0.2))) * 0.5;
+        const wind = e.windup > 0, X = x + e.w / 2 + (wind ? Math.sin(e.t * 2.5) * 2 : 0), Y = y + e.h / 2 + 1, dir = e.vx < 0 ? -1 : 1, open = Math.abs(Math.sin(e.t * (e.angry ? 0.4 : 0.2))) * 0.5;
+        if (wind) {   // crouch and warn before the charge
+          roundRect(X - 8, Y - 38, 16, 18, 6, '#fff3e9', '#b23a48', 1.5);
+          text('!', X, Y - 24, { size: 14, color: '#b23a48', align: 'center', weight: '900' });
+        }
         ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(X, y + e.h + 1, 13, 3.5, 0, 0, TAU); ctx.fill();
         if (e.angry) glow(X, Y, 24, '#ff3040', 0.4);
         ball(X, Y, 12, '#f08a96', '#b23a48', '#5e1520');
@@ -2473,6 +2609,8 @@ function drawEntities(cx, cy) {
       }
     }
   }
+}
+function drawShotsAndBubbles() {
   for (const s of L.shots) { // PSM shots: small pink helices with a trail
     for (let k = 1; k <= 3; k++) circle(s.x - s.vx * k * 0.8, s.y - s.vy * k * 0.8, 4 - k, `rgba(232,138,208,${0.5 - k * 0.12})`);
     ball(s.x, s.y, 5, '#ffe0f4', '#e05fb8', '#8a1f6a');
@@ -2510,7 +2648,7 @@ function drawBoss(e) {
   ctx.strokeStyle = 'rgba(60,110,40,0.9)'; ctx.lineWidth = 3; ctx.stroke();
   ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.ellipse(X - 18, cy - 20, 14, 6, -0.4, 0, TAU); ctx.fill();
   // eyes
-  const look = Math.sign((P.x + P.w / 2) - X) * 4;
+  const look = P ? Math.sign((P.x + P.w / 2) - X) * 4 : 0;
   for (const dx of [-14, 14]) {
     circle(X + dx, cy - 6, 7, '#fff'); circle(X + dx + look, cy - 5, 3.5, '#13240d');
     ctx.strokeStyle = '#2b4a1c'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(X + dx - 8, cy - 16 + (dx < 0 ? 0 : 3)); ctx.lineTo(X + dx + 8, cy - 16 + (dx < 0 ? 3 : 0)); ctx.stroke();
@@ -2520,10 +2658,7 @@ function drawBoss(e) {
 }
 
 function drawFx() {
-  for (const p of L.fx) {
-    ctx.globalAlpha = Math.max(0, p.life / p.max);
-    circle(p.x, p.y, p.r, p.color);
-  }
+  for (const p of L.fx) drawFxParticle(p);
   ctx.globalAlpha = 1;
   ctx.font = `900 15px ${FONT}`; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
   for (const p of L.pops) {
@@ -2570,6 +2705,15 @@ function drawStageBanner() {
   ctx.lineWidth = 7; ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.strokeText(`${L.def.name} · PART ${L.stage + 1}`, VIEW_W / 2, 220);
   ctx.fillStyle = '#fff3c4'; ctx.fillText(`${L.def.name} · PART ${L.stage + 1}`, VIEW_W / 2, 220);
   text(L.def.part2Title, VIEW_W / 2, 244, { size: 15, color: '#c3ffdf', align: 'center', weight: '800' });
+  // split time for part 1, green when ahead of your personal best, red when behind
+  const split = L.splits[L.stage - 1];
+  if (Number.isFinite(split) && age > 14) {
+    const d = L.splitDelta, s = age < 24 ? 1 + Math.pow(1 - (age - 14) / 10, 2) * 0.8 : 1;
+    ctx.save(); ctx.translate(VIEW_W / 2, 278); ctx.scale(s, s);
+    roundRect(-120, -18, 240, 28, 14, 'rgba(10,31,43,0.9)', d === null ? '#c3ffdf' : d <= 0 ? '#5fe38a' : '#ff7a7a', 2);
+    text(`part ${L.stage} split ${fmtTime(split)}${d === null ? '' : '  ' + fmtDelta(d)}`, 0, 1, { size: 15, color: d === null ? '#fff' : d <= 0 ? '#9dffbd' : '#ffb3b3', align: 'center', weight: '900' });
+    ctx.restore();
+  }
   ctx.restore();
 }
 
@@ -2627,9 +2771,21 @@ function drawPlayer() {
       drawCoccus(cx - P.face * i * 13, cy, 14, S.colour, { face: P.face, squash: 0.18 }); ctx.restore();
     }
   }
-  const stretch = !P.onGround && P.vy < -2 ? -Math.min(0.17, Math.abs(P.vy) * 0.015) : 0;
+  const fastFall = !P.onGround && P.vy > 7;
+  const stretch = !P.onGround && P.vy < -2 ? -Math.min(0.17, Math.abs(P.vy) * 0.015) : fastFall ? -Math.min(0.15, (P.vy - 7) * 0.035) : 0;
   const breathe = P.onGround && Math.abs(P.vx) < 0.2 ? Math.sin(L.time * 0.065) * 0.025 : 0;
-  drawCoccus(cx, cy, 14, S.colour, { face: P.face, slow: P.slow > 0, squash: P.squash + stretch + breathe, roll: P.roll, blink: L.time % 240 < 8 || P.shootFlash > 6 });
+  if (fastFall) {   // speed lines above a fast-falling cell
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+    for (const dx of [-9, 0, 9]) { const len = 8 + (P.vy - 7) * 3 + ((L.time * 3 + dx * 7) % 6); ctx.beginPath(); ctx.moveTo(cx + dx, cy - 20 - len); ctx.lineTo(cx + dx, cy - 18); ctx.stroke(); }
+  }
+  const rot = P.spin > 0 ? (1 - P.spin / 18) * TAU * P.face : 0;
+  drawCoccus(cx, cy, 14, S.colour, { face: P.face, slow: P.slow > 0, squash: P.squash + stretch + breathe, roll: P.roll, blink: L.time % 240 < 8 || P.shootFlash > 6, mood: playerMood(), look: P.look, rot });
+  if (playerSweats()) {   // a sweat drop slides down when time or the front is close
+    const k = (L.time % 50) / 50, sx = cx + 13 * P.face * -1, sy = cy - 12 + k * 10;
+    ctx.globalAlpha = 1 - k * 0.6;
+    ctx.fillStyle = '#bfe8ff'; ctx.beginPath(); ctx.moveTo(sx, sy - 5); ctx.quadraticCurveTo(sx + 3.5, sy + 1, sx, sy + 3); ctx.quadraticCurveTo(sx - 3.5, sy + 1, sx, sy - 5); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
   if (P.phos > 12) {
     const k = 1 - (P.phos - 12) / 18;
     ctx.strokeStyle = `rgba(222,255,247,${1 - k})`; ctx.lineWidth = 2;
@@ -2664,19 +2820,22 @@ function drawHUD() {
   drawCoccus(32, 28, 10, S.colour, { face: 1 });
   text(`${S.label} · ${L.def.name}`, 50, 34, { size: 15, color: W, weight: '800' });
   // Replicates: three little culture flasks. A lost one is empty and flashes red.
-  for (let i = 0; i < 3; i++) drawFlask(192 + i * 24, 29, i < P.reps, i === P.reps && P.repFlash > 0 ? P.repFlash : 0);
-  text(`n = ${P.reps}`, 236, 34, { size: 12, color: P.reps < 3 ? '#ffb3a8' : dim, weight: '800' });
-  drawCystineIcon(300, 28, 0.62);
+  // The flasks shake for a moment when one is lost.
+  const shakeX = P.repFlash > 30 ? Math.sin(P.repFlash * 1.3) * (P.repFlash - 30) * 0.18 : 0;
+  for (let i = 0; i < L.maxReps; i++) drawFlask(192 + i * 24 + shakeX, 29, i < P.reps, i === P.reps && P.repFlash > 0 ? P.repFlash : 0);
+  text(`n = ${P.reps}`, 236, 34, { size: 12, color: P.reps < L.maxReps ? '#ffb3a8' : dim, weight: '800' });
+  const bump = (kind, x, y, fn) => { const k = hudScale(kind); ctx.save(); ctx.translate(x, y); ctx.scale(k, k); ctx.translate(-x, -y); fn(); ctx.restore(); };
+  bump('cys', 300, 28, () => drawCystineIcon(300, 28, 0.62));
   const cg = L.def.goals.find(g => g.id === 'cys');
   text(`${L.cystine}${cg ? '/' + cg.n : ''}`, 318, 34, { size: 15, color: cg && L.cystine >= cg.n ? '#8be28f' : W, weight: '800' });
-  drawIronIcon(372, 28, 0.75);
+  bump('iron', 372, 28, () => drawIronIcon(372, 28, 0.75));
   for (let i = 0; i < 3; i++) circle(390 + i * 12, 28, 4, i < L.ironBank ? '#e0743c' : 'rgba(255,255,255,0.22)');
   // glycerol stocks saved (checkpoints) out of the level's total
   roundRect(434, 18, 8, 20, [1, 1, 4, 4], 'rgba(235,245,255,0.85)', 'rgba(255,255,255,0.7)', 1);
   roundRect(435, 28, 6, 9, [0, 0, 3, 3], L.stocks ? '#f3c22f' : '#9aa6b2');
   roundRect(432.5, 14, 11, 5, 1.5, L.stocks ? '#2eaa5c' : '#8a96a3');
   text(`${L.stocks}/${L.totalStocks}`, 450, 34, { size: 15, color: W, weight: '800' });
-  text(`score ${G.score + L.points}`, 500, 34, { size: 15, color: W, weight: '700' });
+  bump('score', 540, 28, () => text(`score ${Math.round(L.shownScore || G.score + L.points)}`, 500, 34, { size: 15, color: hudScale('score') > 1.05 ? '#ffe27a' : W, weight: '700' }));
   let x = 620;
   const chip = (label, col) => {
     ctx.font = `800 12px ${FONT}`;
@@ -2686,11 +2845,13 @@ function drawHUD() {
   };
   if (L.comboT > 0 && L.combo > 1) chip(`combo x${Math.min(L.combo, 5)}`, '#c2410c');
   if (P.shield > 0) chip('AhpC', '#3a7bd5');
-  if (P.magnet > 0) chip(`TcyA ${Math.ceil(P.magnet / 60)}`, '#b38600');
+  if (P.magnet > 0) chip(L.mods.magnet ? 'TcyA ∞' : `TcyA ${Math.ceil(P.magnet / 60)}`, '#b38600');
+  if (G.mode === 'daily') chip(`daily · ${G.daily.mod.label}`, '#7c3aed');
   if (P.slow > 0) chip('HQNO', '#4f7f2a');
   if (P.ammo > 0) chip(`PSM ${P.ammo}`, '#b0408f');
   if (P.gold > 0) chip(`xanthin ${Math.ceil(P.gold / 60)}`, '#c99512');
-  if (L.timeLimit) {
+  if (L.def.endless) drawLogHUD();
+  else if (L.timeLimit) {
     // Game seconds left, scaled so the whole limit shows as 15 pulse minutes.
     const left = Math.max(0, L.timeLimit - L.time / 60) * PULSE_S / L.timeLimit;
     const mm = Math.floor(left / 60), ss = Math.floor(left % 60), urgent = left < 120;
@@ -2700,7 +2861,7 @@ function drawHUD() {
     text(`pulse ${mm}:${String(ss).padStart(2, '0')}`, VIEW_W - 30, 34, { size: 15, color: '#fff', align: 'right', weight: '800' });
   } else {
     // elapsed time, coloured by the medal you are still on track for
-    const secs = L.time / 60, m = medalFor(L.def, secs);
+    const secs = runSecs(), m = G.mode === 'story' ? medalFor(L.def, secs) : null;
     roundRect(VIEW_W - 132, 14, 112, 28, 14, 'rgba(255,255,255,0.12)');
     circle(VIEW_W - 116, 28, 7, m ? m[1] : 'rgba(255,255,255,0.25)');
     text(fmtTime(secs), VIEW_W - 30, 34, { size: 15, color: '#fff', align: 'right', weight: '800' });
@@ -2799,17 +2960,21 @@ function drawPauseMenu() {
   menuRects().forEach((r, i) => {
     const sel = i === G.menuIdx, label = menuItems()[i];
     roundRect(r.x, r.y, r.w, r.h, 12, sel ? '#2b5d8a' : 'rgba(43,93,138,0.08)', sel ? null : 'rgba(43,93,138,0.25)', 1.5);
-    text(label, r.x + r.w / 2, r.y + (L.difficulty < 100 ? 25 : 29), { size: 18, color: sel ? '#fff' : '#22303c', align: 'center', weight: sel ? '800' : '600' });
-    if (sel) text('▶', r.x + 18, r.y + (L.difficulty < 100 ? 25 : 29), { size: 14, color: '#fff', weight: '900' });
+    text(label, r.x + r.w / 2, r.y + 24, { size: 17, color: sel ? '#fff' : '#22303c', align: 'center', weight: sel ? '800' : '600' });
+    if (sel) text('▶', r.x + 18, r.y + 24, { size: 14, color: '#fff', weight: '900' });
   });
   text('↑ ↓ choose · Enter / Space select · P resume', VIEW_W / 2, 466, { size: 13, color: '#6b6455', align: 'center' });
 }
 
 function strainCards() {
-  return ['anc', 'stk', 'stp'].map((key, i) => ({ key, x: 90 + i * 270, y: 228, w: 240, h: 154 }));
+  return ['anc', 'stk', 'stp'].map((key, i) => ({ key, x: 90 + i * 270, y: 222, w: 240, h: 138 }));
 }
 function levelChips() {
-  return LEVELS.map((d, i) => ({ i, x: 180 + i * 190, y: 396, w: 180, h: 36 }));
+  return LEVELS.map((d, i) => ({ i, x: 180 + i * 190, y: 368, w: 180, h: 32 }));
+}
+// slot 4 = daily challenge, 5 = log phase, codex = the collection book
+function modeChips() {
+  return [{ slot: 4, x: 180, y: 408, w: 370, h: 32 }, { slot: 5, x: 560, y: 408, w: 200, h: 32 }, { slot: 'codex', x: 770, y: 408, w: 170, h: 32 }];
 }
 
 // Title background: drifting grape-like clusters of cocci.
@@ -2835,43 +3000,69 @@ function drawTitle() {
   ctx.fillStyle = g; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.drawImage(TITLE_BG, (t * 12) % VIEW_W, 0, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
   ctx.save();
-  ctx.font = `900 64px ${FONT}`; ctx.textAlign = 'center';
-  ctx.lineJoin = 'round'; ctx.lineWidth = 10; ctx.strokeStyle = '#5a3d00'; ctx.strokeText('JE2 JUMP', VIEW_W / 2, 92);
-  const tg = ctx.createLinearGradient(0, 40, 0, 96);
+  ctx.font = `900 60px ${FONT}`; ctx.textAlign = 'center';
+  ctx.lineJoin = 'round'; ctx.lineWidth = 10; ctx.strokeStyle = '#5a3d00'; ctx.strokeText('JE2 JUMP', VIEW_W / 2, 76);
+  const tg = ctx.createLinearGradient(0, 28, 0, 80);
   tg.addColorStop(0, '#fff1a0'); tg.addColorStop(1, '#e0a210');
-  ctx.fillStyle = tg; ctx.fillText('JE2 JUMP', VIEW_W / 2, 92);
+  ctx.fillStyle = tg; ctx.fillText('JE2 JUMP', VIEW_W / 2, 76);
   ctx.restore();
-  drawCoccus(VIEW_W / 2 - 200, 70 + Math.sin(t * 3) * 6, 16, '#0072B2', { face: 1 });
-  drawCoccus(VIEW_W / 2 + 200, 70 + Math.sin(t * 3 + 1.5) * 6, 16, '#009E73', { face: -1 });
-  text('SMALL CELL. BIG REACTION.', VIEW_W / 2, 132, { size: 20, color: '#174953', align: 'center', weight: '900' });
-  text('Choose your strain (1 / 2 / 3, ← →, or click a card to start):', VIEW_W / 2, 216, { size: 16, color: '#2b2b2b', align: 'center' });
+  drawCoccus(VIEW_W / 2 - 190, 56 + Math.sin(t * 3) * 6, 15, '#0072B2', { face: 1, mood: Math.sin(t * 0.7) > 0.6 ? 'happy' : '' });
+  drawCoccus(VIEW_W / 2 + 190, 56 + Math.sin(t * 3 + 1.5) * 6, 15, '#009E73', { face: -1, mood: Math.sin(t * 0.7 + 2) > 0.6 ? 'happy' : '' });
+  text('SMALL CELL. BIG REACTION.', VIEW_W / 2, 108, { size: 18, color: '#174953', align: 'center', weight: '900' });
+  if (G.rival) {   // a race link was opened
+    const r = G.rival, msg = `🏁 Rival ghost loaded: ${LEVELS[r.level].name} · ${r.strain} · ${fmtTime(r.secs)}. Press Enter to race it!`;
+    ctx.font = `800 13px ${FONT}`;
+    const w = ctx.measureText(msg).width + 28;
+    roundRect(VIEW_W / 2 - w / 2, 120, w, 24, 12, '#b3261e');
+    text(msg, VIEW_W / 2, 137, { size: 13, color: '#fff', align: 'center', weight: '800' });
+  }
+  const daily = G.titleMode === 'daily' ? dailyChallenge(dayNumber()) : null;
+  text(daily ? `Today's strain is fixed: ${daily.strain}. Click a card or press Enter to start.` : 'Choose your strain (1 / 2 / 3, ← →, or click a card to start):', VIEW_W / 2, 212, { size: 15, color: '#2b2b2b', align: 'center' });
   for (const c of strainCards()) {
-    const S = STRAINS[c.key], sel = G.strain === c.key, lift = sel ? -6 : 0;
+    const S = STRAINS[c.key], sel = G.strain === c.key, lift = sel ? -6 : 0, locked = daily && !sel;
     ctx.save();
+    if (locked) ctx.globalAlpha = 0.45;
     if (sel) { ctx.shadowColor = rgba(S.colour, 0.45); ctx.shadowBlur = 24; ctx.shadowOffsetY = 6; }
     roundRect(c.x, c.y + lift, c.w, c.h, 16, sel ? '#ffffff' : 'rgba(255,255,255,0.62)');
     ctx.restore();
+    ctx.save();
+    if (locked) ctx.globalAlpha = 0.45;
     roundRect(c.x, c.y + lift, c.w, c.h, 16, null, sel ? S.colour : 'rgba(0,0,0,0.12)', sel ? 4 : 1.5);
-    drawCoccus(c.x + 40, c.y + 44 + lift + (sel ? Math.sin(t * 5) * 3 : 0), 18, S.colour, { face: 1 });
-    text(S.label, c.x + 72, c.y + 42 + lift, { size: 26, color: S.colour, weight: '900' });
-    text(S.title, c.x + 72, c.y + 62 + lift, { size: 13, color: '#555' });
-    S.lines.forEach((ln, i) => text(ln, c.x + 16, c.y + 95 + lift + i * 20, { size: 13, color: '#2b2b2b', weight: '500' }));
+    drawCoccus(c.x + 40, c.y + 42 + lift + (sel ? Math.sin(t * 5) * 3 : 0), 18, S.colour, { face: 1, mood: sel ? 'happy' : '' });
+    text(S.label, c.x + 72, c.y + 40 + lift, { size: 26, color: S.colour, weight: '900' });
+    text(S.title, c.x + 72, c.y + 60 + lift, { size: 13, color: '#555' });
+    S.lines.forEach((ln, i) => text(ln, c.x + 16, c.y + 92 + lift + i * 19, { size: 13, color: '#2b2b2b', weight: '500' }));
+    ctx.restore();
   }
-  // level picker: the game starts at the chosen level
-  text('Level (↑ ↓):', 170, 419, { size: 14, color: '#2b2b2b', align: 'right', weight: '700' });
+  // level picker (story) and the two extra modes; ↑ ↓ moves through all of them
+  text('Story (↑ ↓):', 170, 389, { size: 13, color: '#2b2b2b', align: 'right', weight: '800' });
   const bestTimes = G.times || (G.times = loadTimes());
   for (const c of levelChips()) {
-    const d = LEVELS[c.i], sel = G.startLevel === c.i;
-    roundRect(c.x, c.y, c.w, c.h, 18, sel ? d.theme.accent : 'rgba(255,255,255,0.6)', sel ? null : 'rgba(0,0,0,0.15)', 1.5);
-    text(c.i < 3 ? `${c.i + 1}. ${d.name}` : `★ ${d.name} (bonus)`, c.x + c.w / 2, c.y + 24, { size: 14, color: sel ? '#fff' : '#2b2b2b', align: 'center', weight: '800' });
+    const d = LEVELS[c.i], sel = G.titleMode === 'story' && G.startLevel === c.i;
+    roundRect(c.x, c.y, c.w, c.h, 17, sel ? d.theme.accent : 'rgba(255,255,255,0.6)', sel ? null : 'rgba(0,0,0,0.15)', 1.5);
+    text(c.i < 3 ? `${c.i + 1}. ${d.name}` : `★ ${d.name} (bonus)`, c.x + c.w / 2, c.y + 21, { size: 14, color: sel ? '#fff' : '#2b2b2b', align: 'center', weight: '800' });
     const best = bestTimes[runKey(d)], m = best !== undefined && medalFor(d, best);   // this strain's best medal
-    if (m) { circle(c.x + c.w - 14, c.y + 18, 7, m[1]); ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(c.x + c.w - 14, c.y + 18, 7, 0, TAU); ctx.stroke(); }
+    if (m) { circle(c.x + c.w - 14, c.y + 17, 7, m[1]); ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(c.x + c.w - 14, c.y + 17, 7, 0, TAU); ctx.stroke(); }
+    if (codexData().secrets[c.i]) { ctx.save(); ctx.translate(c.x + 16, c.y + 16); ctx.scale(0.42, 0.42); drawSecret(0, 0, t * 60); ctx.restore(); }   // secret found
+  }
+  text('Modes:', 170, 429, { size: 13, color: '#2b2b2b', align: 'right', weight: '800' });
+  const today = dailyChallenge(dayNumber()), rec = dailyRecord(today.n), counts = codexCounts();
+  for (const c of modeChips()) {
+    const sel = (c.slot === 4 && G.titleMode === 'daily') || (c.slot === 5 && G.titleMode === 'log');
+    const col = c.slot === 4 ? '#7c3aed' : c.slot === 5 ? '#b45309' : '#1f5f66';
+    const pulse = c.slot === 4 && !rec.best ? 0.5 + 0.5 * Math.sin(t * 4) : 0;
+    if (pulse) glow(c.x + c.w / 2, c.y + c.h / 2, c.w * 0.45, '#c4a5ff', 0.25 * pulse);
+    roundRect(c.x, c.y, c.w, c.h, 17, sel ? col : 'rgba(255,255,255,0.6)', sel ? null : rgba(col, 0.6), 1.5);
+    const label = c.slot === 4 ? `☀ Daily #${today.n} · ${LEVELS[today.level].name} p${today.stage + 1} · ${today.mod.label}${rec.best ? ' · ' + fmtTime(rec.best) : ''}`
+      : c.slot === 5 ? `📈 Log phase · best gen ${loadLogBest()}` : `📖 Codex ${counts.seen}/${CODEX.length}`;
+    text(label, c.x + c.w / 2, c.y + 21, { size: 13, color: sel ? '#fff' : '#2b2b2b', align: 'center', weight: '800' });
   }
   ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 4);
-  text(`Press Enter / Space to start${G.best ? '   ·   best score ' + G.best : ''}`, VIEW_W / 2, 466, { size: 17, color: '#10202b', align: 'center', weight: '800' });
+  const what = G.titleMode === 'daily' ? 'the daily challenge' : G.titleMode === 'log' ? 'the log phase climb' : LEVELS[G.startLevel].name;
+  text(`Press Enter / Space to start ${what}${G.best && G.titleMode === 'story' ? '   ·   best score ' + G.best : ''}`, VIEW_W / 2, 464, { size: 16, color: '#10202b', align: 'center', weight: '800' });
   ctx.globalAlpha = 1;
-  text(`C stk dash · hold jump to glide as stp · R retry · G ghost · M sound ${AUDIO.sfxOn ? 'on' : 'off'} · N music ${AUDIO.musicOn ? 'on' : 'off'}`, VIEW_W / 2, 494, { size: 13, color: 'rgba(16,32,43,0.85)', align: 'center', weight: '600' });
-  text('PASN = cell-free spent medium of P. aeruginosa PAO1 (no living Pseudomonas).', VIEW_W / 2, 520, { size: 13, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '500' });
+  text(`B codex · C stk dash · hold jump to glide as stp · R retry · G ghost · I micrograph · M sound ${AUDIO.sfxOn ? 'on' : 'off'} · N music ${AUDIO.musicOn ? 'on' : 'off'}`, VIEW_W / 2, 489, { size: 12, color: 'rgba(16,32,43,0.85)', align: 'center', weight: '600' });
+  text('PASN = cell-free spent medium of P. aeruginosa PAO1 (no living Pseudomonas).', VIEW_W / 2, 512, { size: 12, color: 'rgba(16,32,43,0.75)', align: 'center', weight: '500' });
 }
 
 function drawVignette() { ctx.drawImage(VIGNETTE, 0, 0); }
@@ -2879,7 +3070,10 @@ function drawVignette() { ctx.drawImage(VIGNETTE, 0, 0); }
 function drawWorld() {
   const th = L.def.theme;
   const cx = Math.round(L.cam), cy = Math.round(L.camY);
-  const sx = G.shake ? (Math.random() - 0.5) * G.shake : 0, sy = G.shake ? (Math.random() - 0.5) * G.shake : 0;
+  // smooth shake: two mixed waves per axis instead of random jitter every frame
+  const st = ++G.shakeT;
+  const sx = G.shake ? G.shake * 0.55 * (Math.sin(st * 1.7) * 0.6 + Math.sin(st * 3.1 + 1) * 0.4) : 0;
+  const sy = G.shake ? G.shake * 0.55 * (Math.sin(st * 2.3 + 2) * 0.6 + Math.sin(st * 3.7) * 0.4) : 0;
   ctx.save();
   ctx.translate(sx, sy);
   drawBackground(th, cx, cy);
@@ -2893,8 +3087,9 @@ function drawWorld() {
   drawEntities(cx, cy);
   drawDamageFeedback();
   drawGhost();
-  drawPlayer();
+  if (G.state !== 'lysis') drawPlayer();
   drawFx();
+  drawLabels();
   ctx.restore();
   drawWeather(cx, cy);
   drawForeground(cx, cy);
@@ -2902,12 +3097,14 @@ function drawWorld() {
   drawCaveLight(cx, cy);
   drawVignette();
   drawExposureFront(cx, cy);
+  drawLogFront(cx, cy);
   drawSignText(cx, cy);
-  drawGoalList();
+  if (L.def.goals.length) drawGoalList();
   drawKillFeed();
   drawStageBanner();
   drawHUD();
   drawAbilityHUD();
+  drawFlyers();
 }
 
 // Microscope-style iris: the view opens from a small focused circle.
@@ -2927,26 +3124,40 @@ function drawIris() {
 function draw() {
   ctx.clearRect(0, 0, VIEW_W, VIEW_H);
   if (G.state === 'title') { drawTitle(); drawIris(); return; }
+  if (G.state === 'codex') { drawCodex(); return; }
+  if (G.state === 'replay') { drawReplay(); return; }
   drawWorld();
   const S = STRAINS[G.strain];
   switch (G.state) {
-    case 'intro':
-      panel({ title: `Level ${G.levelIdx + 1}: ${L.def.name}`, sub: L.def.subtitle, lines: L.def.intro.concat([''], goalLines(L.def), [L.difficulty < 100 ? 'Study · optional biology stations · B or click to read' : L.difficulty > 100 ? 'Hard · 15% faster pace · shorter protection after hits' : `Medal times: gold ≤ ${fmtTime(medalTargets(L.def)[0])} · silver ≤ ${fmtTime(medalTargets(L.def)[1])} · bronze ≤ ${fmtTime(medalTargets(L.def)[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: L.def.theme.accent, bodyY: 184, lineH: 25 });
-      break;
+    case 'intro': drawIntro(S); break;
     case 'paused':
       drawPauseMenu();
       break;
-    case 'levelDone': {
-      const r = G.results[G.levelIdx];
-      const stats = `S–S ${r.cystine}/${r.totalCys} · Fe ${r.iron} · replicates ${r.reps}/3 · ${r.secs.toFixed(0)} s   →   +${r.total} points`;
-      panel({ title: `${L.def.name}: sample ${L.def.goalKind === 'sputum' ? 'delivered' : 'measured'}!`, sub: stats, lines: LEVEL_FACTS[G.levelIdx], footer: 'Press Enter to continue', accent: '#1b7f3b', bodyY: 330 });
-      drawStars(r.stars, r.starLabels, 200);
-      // medal time
-      const mx = VIEW_W / 2 - 150;
-      circle(mx, 279, 11, r.medal ? r.medal[1] : '#d9d4c7');
-      if (r.medal) { ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(mx, 279, 11, 0, TAU); ctx.stroke(); }
-      text(`${r.medal ? r.medal[0] + ' medal' : 'no medal'} · time ${fmtTime(r.secs)} · best ${fmtTime(r.best)}${r.newBest ? ' (new best!)' : ''}`, mx + 20, 284, { size: 15, color: '#3d3523', weight: '700' });
-      text(`gold ≤ ${fmtTime(medalTargets(L.def)[0])} · silver ≤ ${fmtTime(medalTargets(L.def)[1])} · bronze ≤ ${fmtTime(medalTargets(L.def)[2])}`, VIEW_W / 2, 304, { size: 12, color: '#8a8270', align: 'center', weight: '600' });
+    case 'lysis': drawLysisOverlay(); break;
+    case 'levelDone': drawLevelResults(); break;
+    case 'dailyDone': {
+      const r = G.dailyResult;
+      panel({
+        title: `☀ Daily #${r.n} done!`, sub: dailyLabel(r),
+        lines: [`time ${fmtTime(r.secs)}${r.newBest ? '  ·  new best today!' : `  ·  best today ${fmtTime(r.best)}`}`,
+          `try ${r.attempts} · replicates ${r.reps}/${r.maxReps} · lost ${r.deaths} · peptides ${r.peptides}`,
+          `Rule of the day: ${r.mod.label} (${r.mod.desc}). A new challenge starts at midnight.`],
+        footer: 'Enter: menu · R: try again for a better time', accent: '#7c3aed', bodyY: 220, lineH: 30,
+      });
+      drawShareButtons('daily');
+      break;
+    }
+    case 'logDone': {
+      const r = G.logResult;
+      panel({
+        title: r.top ? 'Log phase complete: the MS!' : 'n = 0 · the climb is over',
+        sub: `generation ${r.gen}/${LOG_GENS} · 2${sup(r.gen)} cells (a game counter)`,
+        lines: [r.newBest ? `New best generation for ${G.strain}!` : `Best generation for ${G.strain}: ${r.best}`,
+          `time ${fmtTime(r.secs)} · replicates lost ${r.deaths} · points ${r.points}`,
+          'Every climb is generated anew: no two runs are the same.'],
+        footer: 'Enter: menu · R: climb again', accent: '#b45309', bodyY: 220, lineH: 30,
+      });
+      drawShareButtons('endless');
       break;
     }
     case 'gameOver':
@@ -2956,18 +3167,106 @@ function draw() {
         lines: G.failReason === 'pulse'
           ? ['In the real experiment the pulse samples were', 'harvested after exactly 15 min in PASN.', 'Try again, a bit faster.']
           : ['With zero replicates there is nothing to compare:', 'no mean, no variance, no test.', 'Even n = 3 is small, so protect your replicates!'],
-        footer: `R / tap here: retry stock (+3 s) · Enter: restart${L.stage > 0 ? ' part ' + (L.stage + 1) : ''} · Esc: menu`, accent: '#b3261e',
+        footer: G.mode === 'daily' ? 'Enter / R: try the daily challenge again · Esc: menu' : `R / tap here: retry stock (+3 s) · Enter: restart${L.stage > 0 ? ' part ' + (L.stage + 1) : ''} · Esc: menu`, accent: '#b3261e',
       });
       break;
     case 'win':
       panel({
         title: 'All samples measured!', sub: `Strain ${S.label} · total score ${G.score}${G.newBest ? '  (new best!)' : ''}`,
         lines: G.results.filter(Boolean).map(r => `${r.name}: ${r.total} points  ${'★'.repeat(r.stars.filter(Boolean).length)}${'☆'.repeat(r.stars.length - r.stars.filter(Boolean).length)}  ${fmtTime(r.secs)}${r.medal ? ' ' + r.medal[0] : ''}  (peptides ${r.peptides}/${r.totalPep})`).concat([''], strainFact(G.strain)),
-        footer: 'Press Enter to play another strain', accent: '#7a5a00',
+        footer: 'Press Enter to play another strain', accent: '#7a5a00', bodyY: 184, lineH: 26,
       });
+      drawShareButtons('win');
       break;
   }
   drawIris();
+}
+
+function drawIntro(S) {
+  const def = L.def;
+  if (G.mode === 'daily') {
+    const c = G.daily, rec = dailyRecord(c.n);
+    panel({
+      title: `☀ Daily challenge #${c.n}`, sub: dailyLabel(c),
+      lines: def.intro.concat(['', `Rule of the day: ${c.mod.label} (${c.mod.desc}).`,
+        c.stage === 0 ? 'Finish at the PART 2 gate.' : 'Finish at the end of part 2.',
+        `Everyone plays the same challenge today. Your tries so far: ${rec.attempts}${rec.best ? ' · best ' + fmtTime(rec.best) : ''}`,
+        `Playing as ${S.label} (${S.title}) · R restarts instantly`]),
+      footer: 'Press Enter / Space / tap to start', accent: '#7c3aed', bodyY: 184, lineH: 25,
+    });
+    return;
+  }
+  if (def.endless) {
+    panel({
+      title: '📈 Log phase', sub: def.subtitle,
+      lines: def.intro.concat(['', `${LOG_GENS} generations up to an MS at the top. No stocks: R starts a new climb.`,
+        `Best generation for ${S.label}: ${loadLogBest()}`, `Playing as ${S.label} (${S.title})`]),
+      footer: 'Press Enter / Space / tap to start', accent: def.theme.accent, bodyY: 184, lineH: 25,
+    });
+    return;
+  }
+  const rival = L.rival ? [`🏁 Racing a rival ghost: ${fmtTime(L.rival.secs)}`] : [];
+  panel({ title: `Level ${G.levelIdx + 1}: ${def.name}`, sub: def.subtitle, lines: def.intro.concat([''], goalLines(def), rival, [L.difficulty < 100 ? 'Study · optional biology stations · B or click to read' : L.difficulty > 100 ? 'Hard · 15% faster pace · shorter protection after hits' : `Medal times: gold ≤ ${fmtTime(medalTargets(def)[0])} · silver ≤ ${fmtTime(medalTargets(def)[1])} · bronze ≤ ${fmtTime(medalTargets(def)[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: def.theme.accent, bodyY: 184, lineH: 25 });
+}
+
+// n = 0: the cell has burst. A stamp, one line of statistics humour, and a bar that
+// shows the automatic restart coming.
+function drawLysisOverlay() {
+  const t = G.lysisT || 0, k = Math.min(1, t / 12);
+  ctx.fillStyle = `rgba(40,8,14,${0.45 * k})`; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  const s = t < 12 ? 1 + Math.pow(1 - t / 12, 2) * 1.6 : 1;
+  ctx.save(); ctx.translate(VIEW_W / 2, 230); ctx.rotate(-0.06); ctx.scale(s, s);
+  ctx.font = `900 72px ${FONT}`; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+  ctx.lineWidth = 12; ctx.strokeStyle = '#3a0c14'; ctx.strokeText('n = 0', 0, 0);
+  ctx.fillStyle = '#ffd9d9'; ctx.fillText('n = 0', 0, 0);
+  ctx.restore();
+  ctx.globalAlpha = k;
+  text('No replicates left: no mean, no variance, no test.', VIEW_W / 2, 276, { size: 17, color: '#fff', align: 'center', weight: '800' });
+  const where = G.mode === 'daily' ? 'Restarting the daily challenge' : L.stage > 0 ? `Restarting part ${L.stage + 1} from the gate` : 'Restarting the level';
+  text(`${where} … ☠ ${G.deaths} this run`, VIEW_W / 2, 302, { size: 14, color: '#ffc7c7', align: 'center', weight: '700' });
+  roundRect(VIEW_W / 2 - 120, 318, 240, 8, 4, 'rgba(255,255,255,0.2)');
+  roundRect(VIEW_W / 2 - 120, 318, 240 * Math.min(1, t / 70), 8, 4, '#ffd9d9');
+  text(G.mode === 'story' ? 'Enter: restart now · R: retry stock · Esc: menu' : 'Enter: restart now · Esc: menu', VIEW_W / 2, 350, { size: 13, color: 'rgba(255,255,255,0.8)', align: 'center', weight: '700' });
+  ctx.globalAlpha = 1;
+}
+
+// The results screen plays in beats (see effects.js): score rolls up, stars stamp in
+// one after another, the medal drops, then a NEW BEST stamp.
+function drawLevelResults() {
+  const r = G.results[G.levelIdx], T = resultTimeline(r), t = G.resultT;
+  const shown = Math.round(r.total * Math.min(1, t / 30));
+  const stats = `S–S ${r.cystine}/${r.totalCys} · Fe ${r.iron} · replicates ${r.reps}/3 · lost ${r.deaths} · ${r.secs.toFixed(0)} s   →   +${shown} points`;
+  panel({ title: `${L.def.name}: sample ${L.def.goalKind === 'sputum' ? 'delivered' : 'measured'}!`, sub: stats, lines: LEVEL_FACTS[G.levelIdx], footer: resultsDone(r) ? 'Press Enter to continue' : 'Enter: skip', accent: '#1b7f3b', bodyY: 322, lineH: 22 });
+  r.stars.forEach((on, i) => {
+    const x = VIEW_W / 2 + (i - (r.stars.length - 1) / 2) * 150, y = 190, s = stampScale(T.starAt(i));
+    if (s === 0) { star(x, y, 20, false); return; }
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.translate(-x, -y);
+    if (on) glow(x, y, 34, '#f3c22f', 0.35);
+    star(x, y, 22, on);
+    ctx.restore();
+    text(r.starLabels[i], x, y + 38, { size: 12, color: on ? '#5a4500' : '#9a9384', align: 'center', weight: '700' });
+  });
+  // medal: drops in with a small bounce
+  const mx = VIEW_W / 2 - 170, ma = t - T.medalAt, drop = ma < 0 ? null : ma < 14 ? -40 * Math.pow(1 - ma / 14, 2) * Math.abs(Math.cos(ma / 14 * Math.PI * 1.5)) : 0;
+  if (drop !== null) {
+    circle(mx, 262 + drop, 11, r.medal ? r.medal[1] : '#d9d4c7');
+    if (r.medal) { ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(mx, 262 + drop, 11, 0, TAU); ctx.stroke(); }
+  }
+  text(`${r.medal ? r.medal[0] + ' medal' : 'no medal'} · time ${fmtTime(r.secs)} · best ${fmtTime(r.best)}`, mx + 20, 267, { size: 15, color: '#3d3523', weight: '700' });
+  // splits per part, compared with the personal best, plus a rival result
+  const parts = r.splits.map((s, i) => `part ${i + 1} ${fmtTime(s)}${Number.isFinite(r.pbSplits[i]) ? ' (' + fmtDelta(s - r.pbSplits[i]) + ')' : ''}`);
+  const extra = [...parts, r.secret ? '★ secret found' : '', r.rivalDelta === undefined ? '' : r.rivalDelta < 0 ? `🏁 beat the rival by ${(-r.rivalDelta).toFixed(1)} s` : `🏁 rival ahead by ${r.rivalDelta.toFixed(1)} s`].filter(Boolean).join(' · ');
+  if (extra) text(extra, VIEW_W / 2, 292, { size: 12, color: '#5b6b4a', align: 'center', weight: '700' });
+  if (r.newBest) {
+    const s = stampScale(T.bestAt);
+    if (s) {
+      ctx.save(); ctx.translate(VIEW_W / 2 + 250, 258); ctx.rotate(-0.18); ctx.scale(s, s);
+      roundRect(-62, -18, 124, 34, 6, 'rgba(179,38,30,0.12)', '#b3261e', 3);
+      text('NEW BEST!', 0, 7, { size: 18, color: '#b3261e', align: 'center', weight: '900' });
+      ctx.restore();
+    }
+  }
+  drawShareButtons('level');
 }
 
 // ---- main loop: fixed-step update, draw every animation frame -----------------------

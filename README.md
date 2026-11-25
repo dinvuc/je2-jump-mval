@@ -27,11 +27,16 @@ locked gates or teleport channels.
 Every map has **two parts**. Part 1 ends at a glowing "PART 2" vial: walking into
 it saves a stock (like a checkpoint) and moves you straight into part 2 of the same
 map. Time, score, replicates, pickups and power-ups carry over; there is no
-results screen in between. The gate also works as a restart point: if you fail
-in part 2 (n = 0 or the pulse runs out), Enter on the game-over screen restarts
-part 2 from the gate with all three replicates back; time, score and pickups
-return to what you had at the gate. The
-pause menu offers "Restart part 2" as well. Only part 1 restarts the whole map.
+results screen in between. The gate shows your **split time** for part 1, green
+when you are ahead of your personal-best run and red when behind. The gate also
+works as a restart point: if you lose your last replicate (n = 0) in part 2, the
+cell bursts, the world slows for a moment and part 2 restarts from the gate by
+itself, with all three replicates back; time, score and pickups return to what
+you had at the gate. Enter restarts at once, R restores the last stock instead,
+Esc goes to the menu. If the SNpulse pulse runs out, a panel explains the 15-min
+time point and Enter restarts from the gate. The pause menu offers "Restart
+part 2" as well. In part 1, n = 0 restarts the whole map straight away, without
+the intro panel. The results count every replicate you lost (☠).
 
 1. **TSB — the nutrient garden (part 1: 88 × 30 tiles, part 2: 84 × 40):**
    Part 1 is a tutorial in three rooms. Steps, a first gap and low debris lead
@@ -72,6 +77,63 @@ pause menu offers "Restart part 2" as well. Only part 1 restarts the whole map.
    the sputum sample. Jump takeoffs on the main routes are dry. Brace with down
    during a cough or hold jump to ride the updraft.
    **This setting is not part of the course experiment.**
+
+## More ways to play
+
+The title screen lists the four story levels and three more chips; ↑ ↓ moves
+through all of them.
+
+- **Daily challenge (☀).** The date picks one part of one map, a strain and one
+  rule of the day: *Low gravity* (80 % gravity), *Swift cell* (run 25 % faster),
+  *Single replicate* (start with n = 1), *Grounded* (no double jump or glide)
+  or *Cystine magnet* (TcyA pull all run). Everyone gets the same challenge on
+  the same day. A part-1 challenge ends at the PART 2 gate; a part-2 challenge
+  starts at the gate (in SNpulse with the clock where part 2 begins) and ends at
+  the sample. R restarts instantly; your tries and best time today stay in this
+  browser for a month. The rules are game modifiers, not biology.
+- **Log phase (📈).** A climb generated anew for every run: 20 bands of strand
+  steps, conveyor steps, foam, geysers and enemies, getting harder as you rise,
+  up to an MS at the top. Each band you clear is one "generation" and the HUD
+  doubles a cell counter (2ⁿ). A brown front of "depleted medium" rises behind
+  you and gets faster; touching it costs a replicate and throws you upward.
+  There are no stocks: R starts a new climb. The best generation is kept per
+  strain and difficulty. The name, the 2ⁿ counter and the front are game
+  metaphors for growth, not a model of bacterial growth phases.
+- **Codex (📖, B on the title, or "Codex" in the pause menu).** A collection
+  book of the enemies you neutralised (with counts), the hazards you met and the
+  pickups you collected. Each entry shows the short in-game line and the
+  matching checked study note from `STUDY_FACTS` (no new biology text). It also
+  has a **peptide album** (six peptides per map, remembered across runs) and the
+  secrets you found. The first meeting adds a small "NEW IN CODEX" label.
+
+### Sharing, race links and micrographs
+
+On every results screen, **T** (or the button) copies a one-line result such as
+`JE2 Jump · SN · stp · Normal` / `🥇 ⏱ 2:41 ★★☆ 🧪🧪⬜ ☠ 4` with the game's link.
+**L** copies a **race link**: the run's ghost is packed into the part of the
+address after `#` (about 4 bytes per 0.2 s). Whoever opens it gets that level,
+strain and difficulty selected and races your ghost (red, "RIVAL") next to their
+own personal-best ghost; the results say who was faster. **I** saves a
+**micrograph**: the current view in an eyepiece frame with a caption, at any time
+during play. Nothing is uploaded: the part after `#` is never sent to a server,
+and the screenshot is saved by your browser. If copying is blocked, a small panel
+shows the text to copy by hand.
+
+### Secrets, chains and replays
+
+- **Secret rooms.** Each map hides one room behind a wall or floor that looks a
+  little different (hairline cracks). The cell can pass through; enemies, drops
+  and items cannot. Inside is a **golden cluster** (+1000), a game collectible:
+  the name *Staphylococcus aureus* refers to golden, grape-like clusters, but the
+  cluster is not a biological structure. Locations: TSB beside the first debris,
+  SNpulse under the floor on the way to the first peptide, SN in the left wall
+  where the roof shaft lands, CF under the floor right of the first cilia track.
+- **Stomp chains.** Stomping several enemies without touching the ground gives
+  DOUBLE!, TRIPLE! and more, with a rising pitch and +100 per link.
+- **Attempt replay.** Every life (from a start, stock or restart until a fall, a
+  retry or the end of the part) is recorded as a short track. When a map is done
+  and a part took more than one attempt, all tracks of that part run at once on
+  a zoomed-out map of the part (at most about 5 s per part; Enter skips).
 
 Defeated enemies are named twice: a stamped callout appears where they were,
 and a feed below the HUD lists them, stacking repeats as ×2, ×3.
@@ -125,7 +187,9 @@ and use Enter/Space to select it, or click/tap it, then choose a strain to start
 last cryo-vial, or the starting position. Time continues and adds a 3 s penalty.
 Retried runs cannot earn the keep-all-replicates star. An expired SNpulse deadline
 starts a fresh attempt (from the part 2 gate if you already reached part 2). On
-the game-over screen, tap the footer to retry the stock.
+the pulse game-over screen, tap the footer to retry the stock; during the n = 0
+burst, R does the same. In the daily challenge and the log phase, R restarts
+the run instantly instead.
 
 **Antibiotic waves (CF):** a 3 s warning precedes a 4 s inhaled mist. Take cover
 under a floor within 10 tiles above you. Exposed *P. aeruginosa* die; the alginate
@@ -159,6 +223,8 @@ boss is unaffected. Subsequent waves are 55–80 s apart.
 | large vial marked PART 2 | end of part 1: saves a stock and moves on to part 2 |
 | green rods / alginate colony | living P. aeruginosa cells / boss in the CF setting only |
 | info vesicle | approach to read a short tip |
+| wall or floor with hairline cracks | hidden passage to a secret room; the cell passes, enemies do not |
+| golden cluster | secret collectible (+1000), one per map; a game object, not a biological structure |
 
 Between levels, fact cards show real summary numbers from the course analysis.
 A_vs_B > 0 means higher in A; the text says which group is higher.
@@ -166,7 +232,8 @@ A_vs_B > 0 means higher in A; the text says which group is higher.
 Controls: arrows or A/D to move; Space/up/W to jump (press again for a double
 jump as anc/stp); hold jump as stp to glide; C to dash as stk; X/K/Shift to shoot;
 down to brace against a cough; R to retry; G to toggle your ghost; P/Esc to pause;
-Enter to continue; M for effects and N for music. Touch screens get movement,
+Enter to continue; M for effects and N for music; B for the codex (title);
+T to copy a result, L to copy a race link (results) and I to save a micrograph. Touch screens get movement,
 jump, dash, shooting, brace and pause buttons. The page offers full screen.
 
 ## Graphics
@@ -179,6 +246,20 @@ Resizing and full screen rebuild the terrain at the appropriate density.
 Soft distant layers remain intentionally subdued. Character outlines,
 platform edges, opaque text panels, jump stretch, idle breathing and dash
 afterimages improve readability. There are no downloaded graphics or fonts.
+
+Animations added for feel (decoration only, no effect on collisions or routes):
+the cell's face reacts (^ ^ after pickups, wide eyes near danger, > < while
+gliding or dashing, x x after a hit) and its eyes follow the nearest enemy or
+pickup; a roll on the double jump; stretch and speed lines in fast falls; a dust
+ring and thud on hard landings; a sweat drop when the pulse or the front is
+close. Ribosome blocks hop when bumped, debris breaks into tumbling chips, stomps
+send out a shock ring, LasA crouches with a "!" for a moment before it charges,
+and cryo-vials fill up when a stock is saved. Pickups fly into their HUD counter,
+which bounces; the score rolls up; lost flasks shake. The camera looks ahead in
+the direction you face and down while you fall, and screen shake is smooth
+instead of random jitter. Results play in beats: the score counts up, stars stamp
+in one by one with rising notes, the medal drops in and a NEW BEST stamp lands.
+Most first-time tutorial banners became short labels in the world.
 
 ## Music and sound
 
@@ -215,6 +296,9 @@ music falls under the same MIT license as the code.
   cells, the glycerol stock checkpoints, the `stk` dash, the `stp` glide,
   the advancing exposure front, mucus and
   cilia as floor types, flow channels as conveyors in the culture levels,
+  the daily-challenge rules, the log phase (its generations, 2ⁿ counter and
+  rising "depleted medium" front), hidden passages and the golden cluster,
+  stomp chains, the cell's facial expressions,
   rhamnolipid foam as pools, geysers and drifting clumps (their placement,
   timing and amount are invented), and which *P. aeruginosa* products appear where.
 - **Decoration only:** the level art (a biofilm-like ground of packed cocci,
@@ -264,10 +348,25 @@ are standard molecular-biology and proteomics background.
 
 ## Files
 
-index.html and style.css provide the page and canvas. js/facts.js contains strain
-metaphors and sourced summary numbers. js/levels.js builds the layouts;
-js/runtime.js handles rendering density, dash, checkpoints, ghosts and the
-exposure-front display; js/game.js contains physics, entities, drawing and audio.
+index.html and style.css provide the page, the canvas and the lab-notebook note
+("What's new?") in the header. The scripts load in this order, as classic
+`<script>` tags without a build step:
+
+| file | contents |
+|---|---|
+| js/facts.js | strain metaphors, sourced summary numbers, study notes |
+| js/levels.js | the eight hand-built map parts, study stations, secret rooms |
+| js/endless.js | the seeded generator for the log phase climb |
+| js/audio.js | synthesised sound effects and the original chiptune |
+| js/runtime.js | rendering density, dash, checkpoints, splits, ghosts, exposure front |
+| js/effects.js | rings, chips, world labels, HUD fly-ins, gaze and mood, results timing |
+| js/codex.js | the codex, peptide album and secret records |
+| js/share.js | result lines, race-link codec, copying, micrographs |
+| js/modes.js | daily challenge and log phase rules |
+| js/replay.js | attempt tracks and the all-attempts replay |
+| js/game.js | input, physics, entities, drawing and the state machine |
+
+CHANGELOG.md lists what changed between versions.
 
 ## Level building and verification
 
@@ -287,7 +386,8 @@ Never put foam under a low ceiling: the jump over it needs full headroom.
 Timed foam (geysers, drifting clumps) should cross a jump, not cover the only
 safe standing spot. Hide peptides on visible, reachable detours with a clear way back.
 
-Run node tests/game.test.cjs. The dependency-free checks cover every level and
+Run `npm test` (or node tests/game.test.cjs and node tests/features.test.cjs).
+The dependency-free checks cover every level and
 strain, removal of activation mechanics, sample and boss goals, dash collision,
 glide limits, checkpoint snapshots, timed retries, versioned records, ghosts,
 storage errors, scaling and pointer input. tests/routes.cjs searches the real
@@ -301,6 +401,12 @@ Further checks cover geyser and drifting-foam damage, conveyors, foam only in
 PASN and CF levels, and the kill feed.
 Difficulty checks also cover the three buttons, Hard pacing, optional stations, easier timing and
 damage rules, unchanged terrain, and separation of Normal/study records.
+tests/features.test.cjs covers the automatic restart and death count, splits,
+the animated results, share lines, race-link round trips and bad codes, rival
+ghosts, the codex and its storage, stomp chains, the LasA wind-up, the secret
+rooms (including entry and exit with the single jump), the daily challenge and
+its rules, the log phase (route search through generated climbs for several
+seeds, generations, the front, results) and the attempt replay.
 
 ## License
 
