@@ -19,9 +19,15 @@ You are a golden *S. aureus* JE2 cell. Pick one of the three course strains:
 
 Then play the three media of the experiment as levels:
 
-1. **TSB**: control medium, used as a tutorial.
-2. **SNpulse**: grown in TSB, then 15 min PASN. You have to reach the mass spectrometer before the pulse clock runs out.
-3. **SN**: ~15 h in 70 % TSB + 30 % PASN. More hazards, fewer nutrients. You need 6 cystine before the MS takes your sample.
+1. **TSB**: control medium, used as a tutorial. A climb up matrix strands, a
+   high ledge, a drop into a valley and a staircase. No PASN, so no PASN hazards.
+2. **SNpulse**: grown in TSB, then 15 min PASN. Up a strand shaft to a bridge
+   under a pyocyanin ceiling, then down to the MS before the pulse clock runs out.
+3. **SN**: ~15 h in 70 % TSB + 30 % PASN. Start high, drop into a pyocyanin
+   tunnel, climb a long shaft, cross bottomless islands. More hazards, fewer
+   nutrients. You need 6 cystine before the MS takes your sample.
+
+The levels scroll in both directions (up to 40 tiles tall).
 
 PASN is the cell-free, sterile-filtered spent medium of *P. aeruginosa* PAO1.
 It contains secreted molecules only. No living *Pseudomonas* appears in the
@@ -37,7 +43,11 @@ experiment or in the game.
 | blue drops (Pyo) | pyocyanin, which makes ROS and costs a replicate |
 | green cloud | HQNO, which inhibits respiration and makes you slow |
 | LasA | protease that walks back and forth. Jump on it |
-| orange spinner | siderophore. It steals iron |
+| glowing yellow-green claw | siderophore (e.g. pyoverdine). It steals iron |
+| pink foam | rhamnolipids, *P. aeruginosa* biosurfactants. Costs a replicate |
+| cryo-vial | glycerol stock = checkpoint. You restart from the last one you touched |
+| bubble with "i" | info vesicle: walk close to read it |
+| ground of packed cocci, twisted strands | decoration (biofilm look). Strands can be jumped through from below |
 
 Between levels the game shows real summary numbers from our analysis, for
 example the formal-test hit counts for `TSB_vs_SN` and `TSB_vs_SNpulse`. It
@@ -56,7 +66,11 @@ buttons.
   from step 03.
 - **Game metaphors, not biological claims:** "double jump = kinase boost", the
   slow recharge for `stp`, "3 Fe = one replicate", the AhpC shield, the TcyA
-  magnet, HQNO slowing you down, and LasA being stompable.
+  magnet, HQNO slowing you down, LasA being stompable, rhamnolipid foam as a
+  floor hazard, and the glycerol stock checkpoints.
+- **Decoration only:** the level art (a biofilm-like ground of packed cocci,
+  matrix strands, drifting molecules, cell clusters in the background) is there
+  for the look. It does not describe how the course cultures were grown.
 - **No course data in this repo.** Only a few summary numbers are written
   into `js/facts.js`. Raw and derived data stay in the course repository
   and are git-ignored there.
@@ -67,9 +81,10 @@ buttons.
   2006, *PNAS* 103:19890, doi:10.1073/pnas.0606756104
 - Pyocyanin as a redox-active, ROS-generating pigment: Lau *et al.* 2004,
   *Trends Mol Med* 10:599, doi:10.1016/j.molmed.2004.10.002
-- LasA (staphylolysin) as a staphylolytic protease, and pyoverdine/pyochelin
-  as *P. aeruginosa* siderophores: textbook knowledge. We have not added a
-  checked reference yet (TODO).
+- LasA (staphylolysin) as a staphylolytic protease, pyoverdine/pyochelin
+  as *P. aeruginosa* siderophores, and rhamnolipids as *P. aeruginosa*
+  biosurfactants: textbook knowledge. We have not added a checked reference
+  yet (TODO).
 
 ## Files
 
@@ -83,19 +98,25 @@ js/game.js     physics, entities, drawing, state machine
 
 ### Make your own level
 
-Levels are built in code, in tile coordinates (row 14 = ground surface):
+Levels are built in code, in tile coordinates (x = column, y = row, row 0 at
+the top). Something standing on a surface in row 30 sits in row 29:
 
 ```js
-ground(L, 0, 25);              // floor from column 0 to 25
-plat(L, 17, 11, 4);            // 4-tile platform in row 11
-put(L, 'cystine', 18, 10);     // a cystine above it
-put(L, 'lasa', 37);            // a LasA walking on the ground
-sign(L, 13, 'Some text');      // info sign
+const L = newLevel(120, 34);   // 120 columns, 34 rows
+ground(L, 0, 25, 30);          // floor from column 0 to 25, top surface row 30
+solid(L, 30, 34, 20, 22);      // a floating block of biofilm
+plat(L, 17, 27, 4);            // 4-tile strand in row 27
+put(L, 'cystine', 18, 26);     // a cystine on top of it
+put(L, 'lasa', 22, 29);        // a LasA walking on the floor
+foam(L, 8, 9, 29);             // rhamnolipid foam on the floor
+sign(L, 13, 29, 'Some text');  // info vesicle
 ```
 
-A single jump climbs about 3 tiles and crosses about 4 tiles, so the main path
-should never need more than that. Higher platforms are bonus areas for strains
-that can double jump.
+A single jump climbs 3 rows (2 under HQNO) and crosses about 4 columns, so
+the main path should never need more than that. Platforms more than 3 rows up
+are bonus areas for strains that can double jump. All three levels have been
+checked with a physics-based search: every strain can reach the MS, and `stk`
+misses only the double-jump bonus iron.
 
 ## License
 

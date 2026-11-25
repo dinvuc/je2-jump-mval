@@ -1,145 +1,216 @@
 'use strict';
 // levels.js -- the three media of the experiment as three levels.
-// Coordinates are in tiles: x = column (0 = left), y = row (0 = top, 16 = bottom).
-// The ground surface is row 14, so things standing on the ground sit in row 13.
-// Jump reach (see game.js): a single jump climbs ~3 tiles and crosses ~4,
-// so the main path never needs more. Higher platforms are double-jump bonuses.
-
-const ROWS = 17;
-const GROUND = 14;
+// Coordinates are in tiles: x = column (0 = left), y = row (0 = top).
+// Every level has its own size; the camera scrolls left/right AND up/down.
+// "Surface row r" means the top of the solid ground is row r, so anything
+// standing on it sits in row r - 1.
+// Jump reach (see game.js): a single jump climbs 3 rows (2 under HQNO) and
+// crosses about 4 columns, so the main path never needs more. Platforms more
+// than 3 rows up are double-jump bonuses.
+// Tiles: '#' solid biofilm, '=' matrix strand (jump through from below),
+// '^' rhamnolipid foam (hurts).
 
 // ---- small builder helpers ---------------------------------------------------
-function newLevel(cols) {
-  const grid = Array.from({ length: ROWS }, () => Array(cols).fill(' '));
-  return { cols, grid, ents: [], signs: [] };
+function newLevel(cols, rows) {
+  const grid = Array.from({ length: rows }, () => Array(cols).fill(' '));
+  return { cols, rows, grid, ents: [], signs: [] };
 }
 function fill(L, x0, x1, y0, y1, ch) {
   for (let y = y0; y <= y1; y++)
     for (let x = x0; x <= x1; x++)
-      if (y >= 0 && y < ROWS && x >= 0 && x < L.cols) L.grid[y][x] = ch;
+      if (y >= 0 && y < L.rows && x >= 0 && x < L.cols) L.grid[y][x] = ch;
 }
-const ground = (L, x0, x1) => fill(L, x0, x1, GROUND, ROWS - 1, '#');        // solid floor
-const block = (L, x, w, h) => fill(L, x, x + w - 1, GROUND - h, GROUND - 1, '#'); // step on the floor
-const plat = (L, x, y, len) => fill(L, x, x + len - 1, y, y, '=');           // jump-through platform
-const spikes = (L, x0, x1) => fill(L, x0, x1, GROUND - 1, GROUND - 1, '^');
-const put = (L, type, x, y = GROUND - 1) => L.ents.push({ type, tx: x, ty: y });
-const row = (L, type, x0, x1, y = GROUND - 1) => { for (let x = x0; x <= x1; x++) put(L, type, x, y); };
-const sign = (L, x, text) => L.signs.push({ tx: x, text });
+const solid = (L, x0, x1, y0, y1) => fill(L, x0, x1, y0, y1, '#');           // a block of biofilm
+const ground = (L, x0, x1, y) => fill(L, x0, x1, y, L.rows - 1, '#');        // floor from row y to the bottom
+const plat = (L, x, y, len) => fill(L, x, x + len - 1, y, y, '=');           // matrix strand
+const foam = (L, x0, x1, y) => fill(L, x0, x1, y, y, '^');                   // rhamnolipid foam, in the row above a floor
+const put = (L, type, x, y) => L.ents.push({ type, tx: x, ty: y });
+const row = (L, type, x0, x1, y) => { for (let x = x0; x <= x1; x++) put(L, type, x, y); };
+const sign = (L, x, y, text) => L.signs.push({ tx: x, ty: y, text });
 
 // Entity types:
-//   start, goal (mass spectrometer), check (checkpoint)
+//   start, goal (mass spectrometer), check (glycerol stock = checkpoint)
 //   cystine, iron, ahpc (ROS shield), tcya (cystine magnet)
 //   dripper (drops pyocyanin), hqno (drifting cloud), lasa (protease, walks), sidero (siderophore, steals Fe)
 
 // ---- Level 1: TSB (control medium, tutorial) -----------------------------------
+// Flat start, a climb up matrix strands, a high ledge, a drop into a valley,
+// a staircase onto a mound, and down to the MS. No PASN, so no PASN hazards.
 function buildTSB() {
-  const L = newLevel(120);
-  ground(L, 0, 25); ground(L, 28, 46); ground(L, 49, 72); ground(L, 75, 119);
-  put(L, 'start', 2);
-  sign(L, 3, 'Move with ← → (A/D), jump with Space/↑/W. Hold for higher jumps.');
-  row(L, 'cystine', 8, 11);
-  sign(L, 13, 'S–S = L-cystine. S. aureus imports it via the TcyABC transporter (TcyA = B7H15_13375).');
-  plat(L, 17, 11, 4); put(L, 'cystine', 18, 10); put(L, 'cystine', 19, 10);
-  put(L, 'check', 28);
-  put(L, 'iron', 30);
-  sign(L, 31, 'Fe = iron. Every 3 Fe restore one replicate (you have 3 replicates = 3 lives).');
-  block(L, 36, 2, 2); put(L, 'iron', 36, 11);
-  plat(L, 40, 11, 3); put(L, 'iron', 41, 10);
-  put(L, 'check', 51);
-  sign(L, 52, 'Press jump again in the air = double jump (Stk1 boost). stk has none, stp only a weak one.');
-  plat(L, 55, 10, 3); put(L, 'cystine', 56, 9);
-  plat(L, 59, 7, 3); put(L, 'cystine', 60, 6); put(L, 'cystine', 61, 6);
-  spikes(L, 64, 65);
-  sign(L, 66, 'Spikes cost a replicate. Falling out of the culture too.');
-  put(L, 'ahpc', 80);
-  sign(L, 78, 'AhpC (B7H15_02095), alkyl hydroperoxide reductase: a shield against one ROS hit.');
-  row(L, 'cystine', 84, 87, 12);
-  block(L, 90, 1, 1); block(L, 92, 1, 2); block(L, 94, 1, 3);
-  put(L, 'check', 98);
-  plat(L, 100, 11, 3); put(L, 'iron', 101, 10);
-  sign(L, 107, 'Deliver your sample to the LC-MS/MS to finish the level!');
-  put(L, 'goal', 113);
+  const L = newLevel(124, 34);
+  // start area (surface row 30)
+  ground(L, 0, 33, 30);
+  put(L, 'start', 2, 29);
+  sign(L, 4, 29, 'Move with ← → (A/D), jump with Space/↑/W. Hold jump for higher jumps.');
+  row(L, 'cystine', 8, 11, 29);
+  sign(L, 13, 29, 'S–S = L-cystine. S. aureus imports it via the TcyABC transporter (TcyA = B7H15_13375).');
+  solid(L, 16, 18, 28, 29); row(L, 'cystine', 16, 18, 27);
+  // the climb: strands you can jump through from below
+  sign(L, 22, 29, 'Strands can be jumped through from below. Climb up!');
+  plat(L, 25, 28, 3); put(L, 'cystine', 26, 27);
+  plat(L, 29, 26, 3); put(L, 'cystine', 30, 25);
+  plat(L, 25, 24, 3); put(L, 'cystine', 26, 23);
+  plat(L, 29, 22, 3); put(L, 'cystine', 30, 21);
+  plat(L, 25, 20, 3); put(L, 'cystine', 26, 19);
+  plat(L, 29, 18, 3);
+  // high ledge (surface row 16); its wall reaches the floor
+  solid(L, 34, 35, 16, 33); solid(L, 36, 46, 16, 18);
+  put(L, 'check', 37, 15);
+  sign(L, 39, 15, 'Fe = iron. Every 3 Fe restore one replicate (you have 3 replicates = 3 lives).');
+  put(L, 'iron', 41, 15); put(L, 'iron', 44, 15);
+  sign(L, 46, 15, 'Press jump again in the air = double jump (Stk1 boost). stk has none, stp only a weak one.');
+  plat(L, 41, 12, 3); put(L, 'iron', 42, 11);                 // double-jump bonus
+  // floating islands, then down into the valley
+  solid(L, 50, 53, 15, 16); put(L, 'cystine', 51, 14); put(L, 'cystine', 52, 14);
+  solid(L, 57, 60, 17, 18); put(L, 'iron', 58, 16);
+  ground(L, 36, 80, 30);                                       // valley + cave under the ledge
+  put(L, 'iron', 38, 29); put(L, 'cystine', 41, 29); put(L, 'iron', 44, 29);
+  solid(L, 69, 71, 28, 29); put(L, 'cystine', 70, 27);
+  sign(L, 75, 29, 'A pit has no bottom: falling out of the culture costs a replicate.');
+  // pit (81-83), then a staircase up onto a mound (surface row 22)
+  ground(L, 84, 93, 30);
+  solid(L, 88, 89, 28, 29); solid(L, 90, 91, 26, 29); solid(L, 92, 93, 24, 29);
+  ground(L, 94, 106, 22);
+  sign(L, 95, 21, 'AhpC (B7H15_02095), alkyl hydroperoxide reductase: a shield against one ROS hit.');
+  put(L, 'ahpc', 97, 21);
+  plat(L, 99, 19, 3); put(L, 'cystine', 100, 18); put(L, 'cystine', 101, 18);
+  plat(L, 102, 15, 3); put(L, 'iron', 103, 14);              // double-jump bonus
+  // down to the MS (surface row 26)
+  ground(L, 107, 123, 26);
+  put(L, 'check', 108, 25);
+  sign(L, 112, 25, 'Deliver your sample to the LC-MS/MS to finish the level!');
+  put(L, 'goal', 118, 25);
   return L;
 }
 
 // ---- Level 2: SNpulse (TSB, then 15 min PASN) -----------------------------------
+// Up steps to a long ledge, up a strand shaft to a high bridge under a ceiling,
+// then down into a valley with the MS. Most gaps have no bottom.
 function buildSNpulse() {
-  const L = newLevel(130);
-  ground(L, 0, 20); ground(L, 23, 40); ground(L, 43, 60); ground(L, 64, 80);
-  ground(L, 83, 100); ground(L, 103, 129);
-  put(L, 'start', 2);
-  sign(L, 3, '15-min PASN pulse: reach the MS before the pulse clock runs out!');
-  put(L, 'ahpc', 8);
-  put(L, 'dripper', 13, 1);
-  sign(L, 10, 'Blue drops = pyocyanin, a redox-active pigment that generates ROS. AhpC blocks one hit.');
-  row(L, 'cystine', 15, 18);
-  put(L, 'hqno', 31, 10);
-  sign(L, 26, 'Green cloud = HQNO, it inhibits respiration: you get slow and heavy.');
-  put(L, 'lasa', 37);
-  sign(L, 34, 'LasA: a staphylolytic protease. Jump ON it, never touch its sides.');
-  put(L, 'check', 44);
-  plat(L, 46, 11, 4); put(L, 'cystine', 47, 10); put(L, 'cystine', 48, 10);
-  put(L, 'dripper', 51, 1);
-  put(L, 'tcya', 56);
-  sign(L, 54, 'TcyA power-up: the cystine-binding protein pulls S–S towards you.');
-  row(L, 'cystine', 66, 72, 12);
-  put(L, 'hqno', 70, 9); put(L, 'dripper', 75, 1); put(L, 'lasa', 78);
-  put(L, 'check', 85);
-  block(L, 88, 2, 2);
-  plat(L, 92, 10, 3); put(L, 'iron', 93, 9);
-  put(L, 'lasa', 97); put(L, 'dripper', 99, 1);
-  row(L, 'cystine', 105, 107);
-  put(L, 'hqno', 110, 11);
-  sign(L, 118, 'Almost there: the MS takes the pulse sample.');
-  put(L, 'goal', 124);
+  const L = newLevel(130, 36);
+  ground(L, 0, 20, 32);
+  put(L, 'start', 2, 31);
+  sign(L, 4, 31, '15-min PASN pulse: reach the MS before the pulse clock runs out!');
+  put(L, 'ahpc', 7, 31);
+  sign(L, 9, 31, 'Blue drops = pyocyanin, a redox-active pigment that generates ROS. AhpC blocks one hit.');
+  solid(L, 10, 20, 22, 23); put(L, 'dripper', 15, 24);       // overhang with pyocyanin under it
+  put(L, 'cystine', 12, 31); put(L, 'cystine', 13, 31); put(L, 'cystine', 17, 31); put(L, 'cystine', 18, 31);
+  // steps up to the long ledge (surface row 22)
+  solid(L, 21, 24, 30, 35); solid(L, 27, 30, 28, 35);
+  plat(L, 32, 26, 3); plat(L, 35, 24, 2);
+  solid(L, 38, 60, 22, 24);
+  put(L, 'check', 39, 21);
+  sign(L, 41, 21, 'Green cloud = HQNO, it inhibits respiration: you get slow and heavy.');
+  put(L, 'hqno', 45, 18);
+  sign(L, 49, 21, 'LasA: a staphylolytic protease. Jump ON it, never touch its sides.');
+  put(L, 'lasa', 54, 21);
+  put(L, 'cystine', 57, 21); put(L, 'cystine', 58, 21);
+  // strand shaft up to a pillar (surface row 8)
+  plat(L, 62, 20, 3); plat(L, 66, 18, 3); plat(L, 62, 16, 3);
+  plat(L, 66, 14, 3); plat(L, 62, 12, 3); plat(L, 66, 10, 3);
+  put(L, 'cystine', 67, 17); put(L, 'iron', 63, 15); put(L, 'cystine', 67, 9);
+  solid(L, 70, 73, 8, 35);
+  // high bridge under a ceiling with pyocyanin
+  solid(L, 74, 100, 0, 1); put(L, 'dripper', 80, 2); put(L, 'dripper', 93, 2);
+  solid(L, 76, 86, 10, 11); put(L, 'cystine', 79, 9); put(L, 'lasa', 84, 9);
+  solid(L, 90, 100, 12, 13);
+  put(L, 'check', 91, 11);
+  sign(L, 92, 11, 'TcyA power-up: the cystine-binding protein pulls S–S towards you.');
+  put(L, 'tcya', 94, 11);
+  row(L, 'cystine', 96, 99, 11);
+  // down into the valley (surface row 26)
+  plat(L, 103, 16, 3); plat(L, 106, 20, 3);
+  ground(L, 104, 129, 26);
+  put(L, 'iron', 108, 25); put(L, 'lasa', 112, 25);
+  sign(L, 114, 25, 'Pink foam = rhamnolipids: P. aeruginosa biosurfactants that can damage membranes. Jump over!');
+  foam(L, 117, 118, 25);
+  put(L, 'hqno', 120, 22);
+  sign(L, 122, 25, 'Almost there: the MS takes the pulse sample.');
+  put(L, 'goal', 125, 25);
   return L;
 }
 
 // ---- Level 3: SN (~15 h in 30 % PASN) -------------------------------------------
+// Start high, drop into a cavern and a pyocyanin tunnel, climb a long strand
+// shaft, cross bottomless islands at the top, then descend to a valley with
+// foam and walk up to the MS.
 function buildSN() {
-  const L = newLevel(150);
-  ground(L, 0, 18); ground(L, 21, 35); ground(L, 38, 52); ground(L, 56, 70);
-  ground(L, 73, 88); ground(L, 91, 105); ground(L, 108, 122); ground(L, 125, 149);
-  put(L, 'start', 2);
-  sign(L, 3, 'SN: ~15 h in 70 % TSB + 30 % PASN. Nutrients are scarce: collect 6 cystine for the MS.');
-  put(L, 'cystine', 10);
-  sign(L, 12, 'Orange = siderophores (pyoverdine, pyochelin). They grab iron, even from you.');
-  put(L, 'sidero', 15, 9); put(L, 'iron', 17);
-  put(L, 'ahpc', 22); put(L, 'dripper', 25, 1); put(L, 'cystine', 27); put(L, 'dripper', 30, 1);
-  put(L, 'hqno', 33, 10);
-  put(L, 'check', 39);
-  put(L, 'lasa', 43); put(L, 'cystine', 46, 12);
-  plat(L, 47, 11, 3); put(L, 'cystine', 48, 10); put(L, 'iron', 49, 10); put(L, 'sidero', 51, 7);
-  spikes(L, 58, 59); put(L, 'cystine', 62, 12); put(L, 'dripper', 64, 1);
-  put(L, 'hqno', 66, 11); put(L, 'lasa', 68);
-  put(L, 'check', 74); put(L, 'tcya', 76);
-  put(L, 'cystine', 80); put(L, 'cystine', 81);
-  put(L, 'sidero', 84, 8); put(L, 'iron', 85); put(L, 'lasa', 86);
-  put(L, 'hqno', 94, 10); put(L, 'dripper', 97, 1); put(L, 'cystine', 99); put(L, 'dripper', 101, 1);
-  block(L, 103, 1, 2);
-  put(L, 'check', 109); put(L, 'ahpc', 111);
-  put(L, 'lasa', 114); put(L, 'cystine', 116, 12);
-  plat(L, 118, 11, 3); put(L, 'iron', 119, 10); put(L, 'sidero', 121, 7);
-  put(L, 'hqno', 126, 10); put(L, 'dripper', 128, 1); put(L, 'cystine', 131); put(L, 'lasa', 134);
-  sign(L, 139, 'The MS only takes a well-fed sample: 6 cystine needed.');
-  put(L, 'goal', 144);
+  const L = newLevel(150, 40);
+  // starting ledge (surface row 12) above a cavern (surface row 30)
+  solid(L, 0, 14, 12, 14);
+  put(L, 'start', 2, 11);
+  sign(L, 4, 11, 'SN: ~15 h in 70 % TSB + 30 % PASN. Nutrients are scarce: collect 6 cystine for the MS.');
+  put(L, 'cystine', 8, 11);
+  sign(L, 10, 11, 'Glowing claws = siderophores (e.g. pyoverdine). They grab iron, even from you.');
+  put(L, 'sidero', 12, 8); put(L, 'iron', 13, 11);
+  ground(L, 0, 57, 30);
+  plat(L, 16, 16, 3); put(L, 'cystine', 17, 15);
+  plat(L, 20, 19, 3); put(L, 'cystine', 21, 18);
+  plat(L, 16, 22, 3);
+  plat(L, 20, 25, 3);
+  foam(L, 19, 21, 29);
+  put(L, 'ahpc', 25, 29);
+  // pyocyanin tunnel
+  solid(L, 28, 44, 20, 21);
+  put(L, 'dripper', 32, 22); put(L, 'dripper', 40, 22);
+  put(L, 'cystine', 30, 29); put(L, 'hqno', 36, 26); put(L, 'cystine', 38, 29);
+  put(L, 'lasa', 42, 29);
+  // long strand shaft up to a pillar (surface row 6)
+  put(L, 'check', 46, 29);
+  for (let i = 0; i < 11; i++) plat(L, i % 2 ? 48 : 52, 28 - 2 * i, 3);
+  put(L, 'cystine', 53, 27); put(L, 'iron', 49, 21); put(L, 'sidero', 51, 17);
+  put(L, 'iron', 53, 13); put(L, 'cystine', 49, 15); put(L, 'cystine', 53, 7);
+  solid(L, 58, 61, 6, 39);
+  // bottomless islands across the top
+  solid(L, 64, 70, 8, 9); put(L, 'cystine', 66, 7); put(L, 'lasa', 68, 7);
+  solid(L, 74, 80, 10, 11); put(L, 'cystine', 77, 9); put(L, 'sidero', 79, 6); put(L, 'iron', 80, 9);
+  plat(L, 75, 5, 3); put(L, 'iron', 76, 4);                   // double-jump bonus
+  solid(L, 84, 96, 12, 13);
+  put(L, 'check', 85, 11); put(L, 'tcya', 88, 11); put(L, 'hqno', 92, 9); put(L, 'cystine', 94, 11);
+  // descend to the valley (surface row 26) under a pyocyanin ceiling
+  solid(L, 98, 101, 16, 17);
+  solid(L, 104, 108, 20, 21);
+  ground(L, 110, 149, 26);
+  solid(L, 112, 128, 15, 16); put(L, 'dripper', 116, 17); put(L, 'dripper', 124, 17);
+  put(L, 'ahpc', 111, 25);
+  foam(L, 114, 115, 25);
+  put(L, 'lasa', 119, 25); put(L, 'cystine', 121, 25); put(L, 'cystine', 126, 25);
+  put(L, 'hqno', 127, 22);
+  // walk up to the MS (surface row 20)
+  put(L, 'check', 130, 25);
+  solid(L, 132, 134, 24, 25); put(L, 'cystine', 133, 23);
+  solid(L, 136, 138, 22, 25);
+  solid(L, 140, 149, 20, 25);
+  sign(L, 141, 19, 'The MS only takes a well-fed sample: 6 cystine needed.');
+  put(L, 'goal', 145, 19);
   return L;
 }
 
 // Level settings. `timeLimit` is in game seconds; `need` = cystine needed at the MS.
+// Theme colours: sky = medium, far = background clusters, matrix/cells = biofilm,
+// eps = gel surface, plat = strands, mol = drifting molecules, pyo = number of
+// blue pyocyanin specks in the background.
 const LEVELS = [
   {
     name: 'TSB', subtitle: 'Control medium', build: buildTSB, need: 0, timeLimit: 0,
-    theme: { sky: ['#fff6dc', '#f3dca4'], soil: '#c9a46a', top: '#f1d79a', plat: '#a5774a', dots: '#e0b85a55' },
+    theme: {
+      sky: ['#fff6df', '#f0cd8c'], far: '#c08a3a', matrix: ['#b88238', '#5e3e17'],
+      cells: ['#f0c04a', '#dea42c', '#e9b53e'], eps: '#ffeab0', plat: ['#8a5a26', '#d39a52'],
+      mol: '#a8701f', pyo: 0, accent: '#9a6a00',
+    },
     intro: [
       'Tryptic soy broth: rich, calm, no PASN.',
-      'Learn the moves, collect cystine (S–S) and iron (Fe),',
-      'and bring your sample to the mass spectrometer.',
+      'Learn the moves, climb the strands, collect cystine (S–S)',
+      'and iron (Fe), and bring your sample to the mass spectrometer.',
     ],
   },
   {
     name: 'SNpulse', subtitle: 'TSB, then 15 min PASN', build: buildSNpulse, need: 0, timeLimit: 75,
-    theme: { sky: ['#eef7e6', '#cfe5c2'], soil: '#a7a066', top: '#d6dc9b', plat: '#87814b', dots: '#7bb36255' },
+    theme: {
+      sky: ['#eef6e4', '#9fc89c'], far: '#557f4c', matrix: ['#7b934f', '#34472a'],
+      cells: ['#dcc55c', '#c8ad40', '#d2bb4e'], eps: '#e9f2c6', plat: ['#4b6a33', '#93b866'],
+      mol: '#4c7a43', pyo: 10, accent: '#3f6b2a',
+    },
     intro: [
       'Grown in TSB, then 15 min in PASN: the cell-free, sterile-filtered',
       'spent medium of P. aeruginosa PAO1. No living Pseudomonas, only its',
@@ -148,7 +219,11 @@ const LEVELS = [
   },
   {
     name: 'SN', subtitle: '~15 h in 30 % PASN', build: buildSN, need: 6, timeLimit: 0,
-    theme: { sky: ['#d9eef0', '#8fc3c4'], soil: '#5f7f78', top: '#8fb3a6', plat: '#4e6a63', dots: '#2a8fa355' },
+    theme: {
+      sky: ['#d5eeee', '#3f8790'], far: '#2b6268', matrix: ['#4a746d', '#16302f'],
+      cells: ['#bdb06c', '#a89955', '#c6bb7a'], eps: '#c6e4dc', plat: ['#2c514c', '#6fa197'],
+      mol: '#246a73', pyo: 22, accent: '#1f5f66',
+    },
     intro: [
       'Long-term exposure: 70 % TSB + 30 % PASN for ~15 h.',
       'More secreted molecules, fewer nutrients (partly depleted medium).',
