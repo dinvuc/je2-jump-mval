@@ -128,7 +128,7 @@ const LOG_PHASE = {
   theme: {
     sky: ['#fff1d6', '#e8b36a'], far: '#b5793a', matrix: ['#c08a3e', '#5e3e17'],
     cells: ['#f0c04a', '#dea42c', '#e9b53e'], eps: '#ffeab0', plat: ['#8a5a26', '#d39a52'],
-    mol: '#a8701f', pyo: 4, accent: '#b45309', bg: 'tsb', weather: 'snow',
+    mol: '#a8701f', pyo: 4, accent: '#b45309', bg: 'tsb', weather: 'snow', haze: 0.32,
   },
   intro: [
     'A game mode, not part of the course experiment.',

@@ -553,7 +553,9 @@ function buildCF2() {
 // eps = gel surface, plat = strands, mol = drifting molecules, pyo = number of
 // blue pyocyanin specks in the background, dark = how murky the edges of the view get,
 // bg = background style, cough = the patient coughs (and gets inhaled antibiotics),
-// weather = particles in front of the scene. medals = gold / silver / bronze time in seconds.
+// weather = particles in front of the scene, haze = how far the background is faded
+// towards the sky colour so the ground stands out (default 0.18).
+// medals = gold / silver / bronze time in seconds.
 const LEVELS = [
   {
     name: 'TSB', subtitle: 'The nutrient garden', stages: [buildTSB, buildTSB2], timeLimit: 0, medals: [130, 195, 280],
@@ -566,7 +568,7 @@ const LEVELS = [
     theme: {
       sky: ['#fff6df', '#f0cd8c'], far: '#c08a3a', matrix: ['#b88238', '#5e3e17'],
       cells: ['#f0c04a', '#dea42c', '#e9b53e'], eps: '#ffeab0', plat: ['#8a5a26', '#d39a52'],
-      mol: '#a8701f', pyo: 0, accent: '#9a6a00', bg: 'tsb', weather: 'snow',
+      mol: '#a8701f', pyo: 0, accent: '#9a6a00', bg: 'tsb', weather: 'snow', haze: 0.38,
     },
     intro: [
       'Tryptic soy broth: rich, calm, no PASN.',

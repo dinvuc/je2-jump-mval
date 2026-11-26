@@ -19,6 +19,11 @@ You are a golden *S. aureus* JE2 cell. Pick one of the three course strains:
 | stk | stk1::Tn (NTML NE217, Tn at codon 46 of 664) | dasher: no double jump; C dashes on the ground or once per jump in the air (the cell hangs while it dashes), cutting through enemies, superoxide and debris and slamming into the boss; 0.75 s cooldown |
 | stp | stp1::Tn (NTML NE1919, Tn at codon 189 of 247) | drifter: weak, slowly recharging double jump; hold jump to glide for up to 1.5 s while falling; ↓ in the air dives straight down, smashing enemies on the way, and the landing shockwave defeats nearby enemies and breaks debris (a dive even cracks the closed boss shell). No Stp1 **and** much less Stk1 (polar effect) |
 
+**First visit:** the game skips the menu and starts TSB as anc on Normal, with a
+short controls panel. The full title screen (strains, levels, modes) opens after
+the first level is cleared, or at once via P → "Main menu". A race link always
+opens its own level and strain.
+
 All main routes use fixed platforms and the shared single jump. Strain abilities
 help with speed, exploration and recovery. Movement abilities are game metaphors,
 not measured phenotypes. There are no activation buttons, receptors, timed bridges,
@@ -236,7 +241,17 @@ jump as anc/stp); hold jump as stp to glide; ↓ in the air as stp to dive; C to
 down to brace against a cough; R to retry; G to toggle your ghost; P/Esc to pause;
 Enter to continue; M for effects and N for music; B for the codex (title);
 T to copy a result, L to copy a race link (results) and I to save a micrograph. Touch screens get movement,
-jump, dash, shooting, brace and pause buttons. The page offers full screen.
+jump, dash, shooting, brace and pause buttons (at least 44 px). The page offers full screen; below the game
+it lists the five main keys, with all controls behind "All controls".
+
+**Phones:** play with the phone held sideways (the page then shows only the game).
+Held upright, the game is too small to play: a "turn your phone sideways" prompt
+covers it and the game pauses. On small screens, messages, info signs, world labels
+and the goal list are drawn 30 % larger.
+
+**Reduce motion:** the pause menu item "Screen shake & flashes" turns off screen
+shake, the full-screen cough flash and blinking warnings (they stay lit). It
+follows the system's reduce-motion setting until you change it.
 
 ## Graphics
 
@@ -248,6 +263,18 @@ Resizing and full screen rebuild the terrain at the appropriate density.
 Soft distant layers remain intentionally subdued. Character outlines,
 platform edges, opaque text panels, jump stretch, idle breathing and dash
 afterimages improve readability. There are no downloaded graphics or fonts.
+
+**Smooth motion:** physics runs at a fixed 60 steps per second, but the cell, the
+camera and moving enemies are drawn between the last two steps, so motion stays
+even on 90, 120 and 144 Hz screens. The camera snaps to screen pixels, not game
+pixels. The background is faded slightly towards the sky colour (per theme,
+strongest in TSB) so the ground in front of it stands out.
+
+**A calmer screen:** the goal checklist shows in full for 5 s at the start of each
+part, for 4 s whenever a goal changes, and while paused; otherwise it folds into a
+small "☑ 1/3 goals" pill. Control reminders (the ability chip and the R/G/I line)
+fade out after 8 s; stk's dash chip stays while the dash is cooling down. Messages
+appear below the HUD bar, or at the bottom of the view when the cell is up there.
 
 Animations added for feel (decoration only, no effect on collisions or routes):
 the cell's face reacts (^ ^ after pickups, wide eyes near danger, > < while
@@ -271,9 +298,11 @@ The music adds a percussion layer when enemies are near and is muffled in
 tunnels; each level has its own victory jingle, and a chime plays when a goal
 is ticked off.
 
-The soundtrack is an original chiptune written for this game: an 8-bar theme
-over C–Am–F–G, with a different arrangement per medium (bright for TSB,
-faster for SNpulse, a darker minor version for SN). It and all sound effects
+The soundtrack is an original chiptune written for this game: an 8-bar A theme
+over C–Am–F–G and an 8-bar B section over F–G–Em–Am–F–G–C–C (longer notes, a
+half-time snare), played in turn, with a different arrangement per medium (bright
+for TSB, faster for SNpulse, a darker minor version for SN). The boss fight loops
+the A theme only. It and all sound effects
 are synthesised live in the browser with the Web Audio API. There are no
 sound files, no samples and no third-party music in this repository, so the
 music falls under the same MIT license as the code.
@@ -369,7 +398,9 @@ index.html and style.css provide the page, the canvas and the lab-notebook note
 | js/share.js | result lines, race-link codec, copying, micrographs |
 | js/modes.js | daily challenge and log phase rules |
 | js/replay.js | attempt tracks and the all-attempts replay |
-| js/game.js | input, physics, entities, drawing and the state machine |
+| js/playtest.js | the hit-and-fall log and its heat map (`?debug=deaths`) |
+| js/entities.js | one entry per entity type: set-up, hit box, update and drawing |
+| js/game.js | input, physics, shared entity rules, drawing and the state machine |
 
 CHANGELOG.md lists what changed between versions.
 
@@ -391,6 +422,26 @@ Never put foam under a low ceiling: the jump over it needs full headroom.
 Timed foam (geysers, drifting clumps) should cross a jump, not cover the only
 safe standing spot. Hide peptides on visible, reachable detours with a clear way back.
 
+Jump physics live in js/game.js: in the air the cell keeps more speed when you let
+go (AIR_FRICTION), hangs briefly at the top of a held jump (APEX_GRAV) and falls a
+little faster than it rises (FALL_GRAV). A full jump rises about 98 px and stays in
+the air 41 frames. `fallStep()` is shared with the route search, so any change to
+the arc is checked against every route.
+
+New entity types go in js/entities.js: one entry with `init`, `box` (enemies),
+`update` and `draw`. Enemies also need their names in ENEMIES, ENEMY_COL and
+ENEMY_NAME in js/game.js.
+
+### Playtesting
+
+Every hit and fall is logged in the browser (map, part, position, cause,
+difficulty and strain; at most 3,000 entries). Open the game with `?debug=deaths`
+after the address (for example `index.html?debug=deaths`) to see the log of the
+current part as a heat map, red for hits and blue for falls, with counts per
+cause. J copies the whole log as JSON, so playtesters can send it to the team.
+Nothing is uploaded. Use it to find where players fail before changing a layout
+or the medal times.
+
 Run `npm test` (or node tests/game.test.cjs and node tests/features.test.cjs).
 The dependency-free checks cover every level and
 strain, removal of activation mechanics, sample and boss goals, dash collision,
@@ -406,7 +457,10 @@ Further checks cover geyser and drifting-foam damage, conveyors, foam only in
 PASN and CF levels, and the kill feed.
 Difficulty checks also cover the three buttons, Hard pacing, optional stations, easier timing and
 damage rules, unchanged terrain, and separation of Normal/study records.
-tests/features.test.cjs covers the automatic restart and death count, splits,
+tests/features.test.cjs also covers the jump arc and air control, drawing between
+physics steps, the folding goal list and the SNpulse deadline goal, message
+placement and small-screen scaling, the first visit, reduce motion, the playtest
+log and both soundtrack sections (against a fake Web Audio clock). It covers the automatic restart and death count, splits,
 the animated results, share lines, race-link round trips and bad codes, rival
 ghosts, the codex and its storage, stomp chains, the LasA wind-up, the secret
 rooms (including entry and exit with the single jump), the daily challenge and

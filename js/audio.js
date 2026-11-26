@@ -103,15 +103,32 @@ const AUDIO = (() => {
     [112, 83, 4], [116, 86, 2], [118, 83, 2], [120, 79, 8],
   ];
   const CHORDS = [[48, 52, 55], [45, 48, 52], [41, 45, 48], [43, 47, 50]];   // C, Am, F, G
-  const melodyAt = new Map(MELODY.map(m => [m[0], m]));
-  // Per-medium arrangements: tempo, transposition, minor mode, lead sound, drum density.
+  // -- the B section: 8 more bars over F G Em Am | F G C C, longer notes and a
+  // rising answer, so the theme no longer loops on its own. Original composition.
+  const MELODY_B = [
+    [0, 81, 4], [4, 84, 2], [6, 81, 2], [8, 77, 6], [14, 79, 2],
+    [16, 83, 4], [20, 86, 2], [22, 83, 2], [24, 79, 6], [30, 81, 2],
+    [32, 83, 3], [35, 79, 1], [36, 76, 4], [40, 79, 2], [42, 83, 2], [44, 86, 4],
+    [48, 84, 6], [54, 83, 1], [55, 81, 1], [56, 81, 8],
+    [64, 77, 2], [66, 81, 2], [68, 84, 2], [70, 89, 2], [72, 88, 4], [76, 84, 4],
+    [80, 86, 2], [82, 83, 2], [84, 79, 2], [86, 83, 2], [88, 86, 4], [92, 91, 4],
+    [96, 88, 4], [100, 91, 2], [102, 88, 2], [104, 84, 4], [108, 86, 2], [110, 88, 2],
+    [112, 84, 6], [118, 79, 2], [120, 84, 8],
+  ];
+  const F = [41, 45, 48], Gc = [43, 47, 50], Em = [40, 43, 47], Am = [45, 48, 52], C = [48, 52, 55];
+  const SECTIONS = {
+    A: { melody: new Map(MELODY.map(m => [m[0], m])), chords: CHORDS },
+    B: { melody: new Map(MELODY_B.map(m => [m[0], m])), chords: [F, Gc, Em, Am, F, Gc, C, C] },
+  };
+  // Per-medium arrangements: tempo, transposition, minor mode, lead sound, drum density,
+  // and the form (the order of the 8-bar sections; every song plays A then B unless set).
   const SONGS = {
     title: { bpm: 108, tr: 0, minor: false, lead: 'square', drums: 1 },
     TSB: { bpm: 116, tr: 0, minor: false, lead: 'square', drums: 1 },
     SNpulse: { bpm: 138, tr: 2, minor: false, lead: 'square', drums: 2 },
     SN: { bpm: 100, tr: -3, minor: true, lead: 'triangle', drums: 1 },
     'CF airway': { bpm: 108, tr: -5, minor: true, lead: 'triangle', drums: 1 },
-    boss: { bpm: 152, tr: -2, minor: true, lead: 'square', drums: 2 },
+    boss: { bpm: 152, tr: -2, minor: true, lead: 'square', drums: 2, form: 'A' },   // the tense A theme only
     'Log phase': { bpm: 128, tr: 4, minor: false, lead: 'square', drums: 2 },
   };
   let song = null, step = 0, nextT = 0;
@@ -120,8 +137,9 @@ const AUDIO = (() => {
     return midi(n + song.tr);
   };
   function playStep(s, t) {
-    const sp = 60 / song.bpm / 4, bar = Math.floor(s / 16), chord = CHORDS[bar % 4], inBar = s % 16;
-    const m = melodyAt.get(s);
+    const form = song.form || 'AB', name = form[Math.floor(s / 128) % form.length], sec = SECTIONS[name];
+    const sp = 60 / song.bpm / 4, ls = s % 128, bar = Math.floor(ls / 16), chord = sec.chords[bar % sec.chords.length], inBar = s % 16;
+    const m = sec.melody.get(ls);
     if (m) tone(pitch(m[1]), pitch(m[1]), m[2] * sp * 0.95, song.lead, song.lead === 'square' ? 0.035 : 0.07, t, musBus);
     if (inBar % 2 === 0) {                                   // bouncy octave bass
       const n = chord[0] - 12 + (inBar % 4 === 2 ? 12 : 0);
@@ -130,7 +148,7 @@ const AUDIO = (() => {
     const an = chord[inBar % 3] + 12;                        // soft arpeggio
     tone(pitch(an), pitch(an), sp * 0.9, 'sine', 0.025, t, musBus);
     if (inBar === 0 || inBar === 8 || (song.drums > 1 && inBar === 10)) tone(150, 45, 0.14, 'sine', 0.22, t, musBus);   // kick
-    if (inBar === 4 || inBar === 12) hiss(0.11, 0.07, t, 1200, musBus);                                                  // snare
+    if (name === 'B' ? inBar === 8 : inBar === 4 || inBar === 12) hiss(0.11, 0.07, t, 1200, musBus);                     // snare (half time in B)
     if (song.drums > 1 ? true : inBar % 2 === 0) hiss(0.03, inBar % 4 === 2 ? 0.035 : 0.018, t, 7000, musBus);          // hi-hat
     if (intensity > 0.5) {                                   // danger layer: enemies nearby
       if (inBar % 2 === 1) hiss(0.025, 0.03, t, 9000, musBus);
@@ -144,7 +162,7 @@ const AUDIO = (() => {
     while (nextT < ac.currentTime + 0.12) {
       playStep(step, nextT);
       nextT += 60 / song.bpm / 4;
-      step = (step + 1) % 128;
+      step = (step + 1) % (128 * (song.form || 'AB').length);
     }
   }
 

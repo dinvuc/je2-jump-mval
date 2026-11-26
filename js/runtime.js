@@ -1,11 +1,17 @@
 'use strict';
 // Rendering, movement abilities, checkpoints and personal ghosts.
 const RUN_VERSION = 5;
-let renderScale = 1;
+let renderScale = 1, cssWidth = 960;   // displayed canvas width in CSS pixels
+
+// Canvas text is laid out for the 960-px game view. On a small screen (a phone held
+// sideways shows the game about 650 px wide) messages, signs and the goal list are
+// drawn 30 % larger so they stay readable.
+function uiScale() { return cssWidth < 760 ? 1.3 : 1; }
 
 // Keep physics in logical pixels; draw vectors at the display's actual density.
 function configureCanvas() {
   const width = canvas.getBoundingClientRect().width || VIEW_W;
+  cssWidth = width;
   const next = Math.ceil(Math.max(1, Math.min(3, width / VIEW_W * (window.devicePixelRatio || 1))) * 4) / 4;
   if (canvas.width === Math.round(VIEW_W * next) && canvas.height === Math.round(VIEW_H * next)) return false;
   renderScale = next;
@@ -14,6 +20,27 @@ function configureCanvas() {
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
   return true;
 }
+
+// Smooth motion on any refresh rate. Physics steps at 60 Hz, but screens draw at
+// 60, 90, 120 or 144 Hz. The cell and the camera (and moving enemies, see
+// drawEntities) are drawn between their last two physics steps, `alpha` of the way.
+function rememberRenderState() {
+  G.prevRender = L && P ? { L, P, x: P.x, y: P.y, cam: L.cam, camY: L.camY } : null;
+}
+function drawInterpolated(alpha) {
+  const r = G.prevRender;
+  const smooth = !!r && r.L === L && r.P === P && G.state === 'play' && alpha < 1 &&
+    Math.abs(P.x - r.x) < 64 && Math.abs(P.y - r.y) < 64 && Math.abs(L.cam - r.cam) < 160 && Math.abs(L.camY - r.camY) < 160;
+  G.alpha = smooth ? alpha : 1;
+  if (!smooth) { draw(); return; }
+  const now = [P.x, P.y, L.cam, L.camY];
+  P.x = r.x + (P.x - r.x) * alpha; P.y = r.y + (P.y - r.y) * alpha;
+  L.cam = r.cam + (L.cam - r.cam) * alpha; L.camY = r.camY + (L.camY - r.camY) * alpha;
+  try { draw(); } finally { [P.x, P.y, L.cam, L.camY] = now; }
+}
+// Camera positions are snapped to whole screen pixels (not whole game pixels), so
+// scrolling stays smooth on high-density screens.
+const devicePx = v => Math.round(v * renderScale) / renderScale;
 
 function terrainSurface(width, height) {
   const surface = document.createElement('canvas');
@@ -202,20 +229,32 @@ function drawDamageFeedback() {
   ctx.restore();
 }
 
+// Control reminders fade out 8 s into each part; stk's dash state stays visible
+// while it matters (cooling down, or the air dash already used).
+const hintAlpha = () => clamp((L.hintT || 0) / 40, 0, 1);
 function drawAbilityHUD() {
   const label = G.strain === 'stk'
     ? (P.dashCool > 0 ? 'C  DASH · ' + (P.dashCool / 60).toFixed(1) + ' s' : P.airDash ? 'C  DASH · land to recharge' : 'C  DASH · ground + air')
     : G.strain === 'stp' ? 'HOLD JUMP GLIDE · ↓ DIVE' : 'SPACE · DOUBLE JUMP';
-  roundRect(14, 58, 184, 30, 10, 'rgba(10,31,43,0.9)');
-  text(label, 26, 78, { size: 12, color: '#f3e4b9', weight: '800' });
+  const a = G.strain === 'stk' && (P.dashCool > 0 || P.airDash) ? 1 : hintAlpha();
+  ctx.save(); ctx.globalAlpha = a;
+  if (a > 0) {
+    roundRect(14, 58, 184, 30, 10, 'rgba(10,31,43,0.9)');
+    text(label, 26, 78, { size: 12, color: '#f3e4b9', weight: '800' });
+  }
+  ctx.restore();
   if (L.def.name === 'SNpulse') {
     const ahead = Math.ceil((exposureFrontY() - P.y) / TILE);
     roundRect(786, 58, 160, 46, 11, 'rgba(10,31,43,0.92)', '#78d9ef', 1);
     text(ahead > 0 ? 'AHEAD OF EXPOSURE' : 'IN EXPOSURE', 866, 77, { size: 12, color: ahead > 0 ? '#9fffe0' : '#ffc99b', align: 'center', weight: '800' });
     text(ahead > 0 ? ahead + ' tiles clear' : 'Sources fire faster', 866, 94, { size: 12, color: '#e6f3fa', align: 'center' });
   }
-  text((G.mode === 'story' ? 'R retry stock' : 'R restart') + ' · G ghost ' + (G.ghostOn ? 'on' : 'off') + ' · I micrograph', VIEW_W - 18, VIEW_H - 14, { size: 12, color: '#f5fcff', align: 'right', weight: '700' });
-  if (L.difficulty !== 100 && G.toastT <= 0) {
+  if (hintAlpha() > 0) {
+    ctx.save(); ctx.globalAlpha = hintAlpha();
+    text((G.mode === 'story' ? 'R retry stock' : 'R restart') + ' · G ghost ' + (G.ghostOn ? 'on' : 'off') + ' · I micrograph', VIEW_W - 18, VIEW_H - 14, { size: 12, color: '#f5fcff', align: 'right', weight: '700' });
+    ctx.restore();
+  }
+  if (L.difficulty !== 100 && G.toastT <= 0 && (hintAlpha() > 0 || G.studyStation)) {
     roundRect(210, 58, 250, 30, 10, 'rgba(10,31,43,0.92)', '#a7e0d4', 1);
     text(L.difficulty < 100 ? 'STUDY · B read nearby station' : 'HARD · faster pace', 222, 78, { size: 12, color: '#c3ffdf', weight: '800' });
   }

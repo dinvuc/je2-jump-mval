@@ -15,22 +15,20 @@
         <details id="lab-note" class="lab-note">
           <summary><span class="pin" aria-hidden="true"></span><span class="note-kicker">Lab notebook</span><strong>What's new?</strong><span class="note-hint">click to read</span></summary>
           <div class="lab-note-body">
-            <p class="note-date">Entry · 25 Nov 2026 · protocol update</p>
+            <p class="note-date">Entry · 26 Nov 2026 · polish update</p>
             <h2>New in the culture</h2>
             <ul>
-              <li><b>Instant retry.</b> At n = 0 the cell bursts and the part restarts by itself. The results count your lost replicates (☠).</li>
-              <li><b>Split times.</b> The PART 2 gate shows your part-1 time: green if you are ahead of your best run, red if behind.</li>
-              <li><b>Share.</b> On results screens, <kbd>T</kbd> copies a one-line result, <kbd>L</kbd> copies a link that lets a friend race your ghost, <kbd>I</kbd> saves a micrograph screenshot (also in play).</li>
-              <li><b>Daily challenge.</b> One part, one strain, one rule of the day, the same for everyone.</li>
-              <li><b>Log phase.</b> A generated climb of 20 generations while a rising front chases you. A new climb every run.</li>
-              <li><b>Codex</b> (<kbd>B</kbd> on the title, or the pause menu). Everything you met, with the checked biology notes and a peptide album.</li>
-              <li><b>Secrets and chains.</b> One hidden room per map (look for cracked walls). Stomp enemies without landing for DOUBLE! TRIPLE!</li>
-              <li><b>Replays.</b> When a part took several attempts, all of them run at once on a map of the part.</li>
-              <li><b>Stronger strains.</b> stk dashes in the air too and its dash cuts through enemies. stp glides longer and dives with <kbd>↓</kbd>, smashing enemies and debris.</li>
-              <li><b>Study mode.</b> Enemies and hazards are slower, but your cell moves at full speed. Study plays the story only.</li>
-              <li><b>Calmer tips.</b> Info signs speak only after you stand on the <i>i</i> for a second, in a small see-through panel.</li>
-              <li><b>Animations.</b> Faces that react, eyes that follow, a double-jump spin, bouncing blocks, LasA wind-ups, pickups flying into the HUD, stamped results.</li>
+              <li><b>Jumps carry.</b> The cell keeps its speed in the air, hangs a moment at the top of a held jump and falls a little faster. Still three rows high.</li>
+              <li><b>Smooth on fast screens.</b> Motion stays even on 90, 120 and 144 Hz displays.</li>
+              <li><b>A calmer screen.</b> The goal list folds into a small pill and reopens when a goal changes; reminders fade after 8 s; messages move away from your cell.</li>
+              <li><b>Fixed.</b> The SNpulse deadline goal is no longer ticked from the start.</li>
+              <li><b>Quicker start.</b> A first visit starts TSB straight away; the full menu opens after the first level.</li>
+              <li><b>Phones.</b> Hold it sideways; upright it pauses and asks you to turn it. Bigger buttons and text.</li>
+              <li><b>Reduce motion</b> in the pause menu: no screen shake, flashes or blinking.</li>
+              <li><b>Music.</b> A new B section alternates with the theme.</li>
+              <li><b>Playtesters:</b> open the game with <kbd>?debug=deaths</kbd> for a heat map of where you got hit; <kbd>J</kbd> copies it.</li>
             </ul>
+            <p class="note-date">Earlier · 25 Nov 2026: instant retry, split times, sharing and race links, daily challenge, log phase, codex, secrets, replays, stronger strains, Study mode. See CHANGELOG.md.</p>
             <p class="note-foot">Game mechanics stay metaphors, not biological claims. Details in the README.</p>
           </div>
         </details>
@@ -65,6 +63,7 @@
         <textarea id="share-text" rows="5" readonly></textarea>
         <div><button id="share-copy" type="button">Copy</button><button id="share-close" type="button">Close</button></div>
       </aside>
+      <div id="rotate" role="status"><span class="rotate-icon" aria-hidden="true">📱</span><b>Turn your phone sideways to play</b><span>The game pauses until it is in landscape.</span></div>
       <div id="touch" hidden>
         <button data-key="pause" class="pause" aria-label="pause or resume">Ⅱ</button>
         <button data-key="left" aria-label="left">◀</button>
@@ -77,14 +76,20 @@
       </div>
     </div>
     <p class="help">
-      <kbd>←</kbd><kbd>→</kbd> / <kbd>A</kbd><kbd>D</kbd> move ·
-      <kbd>Space</kbd> / <kbd>↑</kbd> / <kbd>W</kbd> jump (press again in the air for a double jump) ·
-      <kbd>C</kbd> stk dash (also in the air) · hold jump as stp to glide · <kbd>↓</kbd> in the air as stp to dive ·
-      <kbd>X</kbd> shoot · <kbd>↓</kbd> brace ·
-      <kbd>R</kbd> retry checkpoint · <kbd>G</kbd> personal ghost ·
-      <kbd>B</kbd> codex (title) · <kbd>T</kbd> share result · <kbd>L</kbd> race link · <kbd>I</kbd> micrograph ·
-      <kbd>P</kbd> pause · <kbd>M</kbd> sound · <kbd>N</kbd> music
+      <kbd>←</kbd><kbd>→</kbd> move · <kbd>Space</kbd> jump · <kbd>X</kbd> shoot · <kbd>R</kbd> retry · <kbd>P</kbd> pause
     </p>
+    <details class="help-more">
+      <summary>All controls</summary>
+      <p class="help">
+        <kbd>←</kbd><kbd>→</kbd> / <kbd>A</kbd><kbd>D</kbd> move ·
+        <kbd>Space</kbd> / <kbd>↑</kbd> / <kbd>W</kbd> jump (press again in the air for a double jump) ·
+        <kbd>C</kbd> stk dash (also in the air) · hold jump as stp to glide · <kbd>↓</kbd> in the air as stp to dive ·
+        <kbd>X</kbd> / <kbd>K</kbd> / <kbd>Shift</kbd> shoot · <kbd>↓</kbd> brace ·
+        <kbd>R</kbd> retry checkpoint · <kbd>G</kbd> personal ghost ·
+        <kbd>B</kbd> codex (title) · <kbd>T</kbd> share result · <kbd>L</kbd> race link · <kbd>I</kbd> micrograph ·
+        <kbd>P</kbd> pause · <kbd>M</kbd> sound · <kbd>N</kbd> music
+      </p>
+    </details>
     <p class="small">
       Inspired by the Bio253 block course <em>S. aureus</em> JE2 proteomics data (genotypes anc / stk / stp;
       media TSB / SNpulse / SN). Game mechanics are metaphors, not biological claims; see the README.
@@ -100,6 +105,8 @@
   <script src="js/share.js"></script>
   <script src="js/modes.js"></script>
   <script src="js/replay.js"></script>
+  <script src="js/playtest.js"></script>
+  <script src="js/entities.js"></script>
   <script src="js/game.js"></script>
 </body>
 </html>

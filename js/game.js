@@ -11,6 +11,15 @@ const TAU = Math.PI * 2;
 const GRAV = 0.55, MAX_FALL = 12;
 const RUN_ACC = 0.6, RUN_MAX = 3.8, FRICTION = 0.78;
 const JUMP_V = -10.6;
+// Game feel: in the air the cell keeps more of its sideways speed when you let go,
+// hangs briefly at the top of a held jump and falls a little faster than it rises.
+// The arc keeps its ~3-row height (about 1 px higher) and gains a little reach.
+const AIR_FRICTION = 0.94, APEX_VY = 1.5, APEX_GRAV = 0.6, FALL_GRAV = 1.12;
+// One vertical physics step, shared by play and the route search in tests/routes.cjs.
+function fallStep(vy, holding, grav = GRAV) {
+  const k = holding && Math.abs(vy) < APEX_VY ? APEX_GRAV : vy > 0 ? FALL_GRAV : 1;
+  return Math.min(vy + grav * k, MAX_FALL);
+}
 const COYOTE = 12;  // frames you may still jump after walking off a ledge (0.2 s)
 const BUFFER = 6;   // frames a jump press is remembered before landing
 const LYSIS_DELAY = 36, LYSIS_DOWN = 240;   // lysed cells: collapse after 0.6 s, back after 4 s
@@ -48,6 +57,7 @@ const KEYMAP = {
   KeyM: ['mute'], KeyN: ['music'], KeyX: ['shoot'], KeyK: ['shoot'], ShiftLeft: ['shoot'], ShiftRight: ['shoot'],
   KeyC: ['dash'], KeyR: ['retry'], KeyG: ['ghost'],
   KeyB: ['biology'], KeyT: ['share'], KeyL: ['link'], KeyI: ['photo'],
+  KeyJ: ['json'],   // copies the playtest log, only with ?debug=deaths (playtest.js)
 };
 function press(k) { if (!keys[k]) pressed[k] = true; keys[k] = true; }
 function release(k) { keys[k] = false; }
@@ -70,6 +80,9 @@ function clearPressed() { for (const k in pressed) pressed[k] = false; }
 
 // Touch buttons (only shown on touch screens).
 const touchBox = document.getElementById('touch');
+// An upright phone shows the game too small to play; style.css covers it with a
+// "turn your phone sideways" prompt and the game pauses (see update()).
+const PORTRAIT_PHONE = matchMedia('(pointer: coarse) and (orientation: portrait) and (max-width: 600px)');
 for (const b of touchBox.querySelectorAll('button')) {
   const k = b.dataset.key;
   b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); AUDIO.unlock(); press(k); });
@@ -168,6 +181,7 @@ function mix(h1, h2, t) {
 // ---- game state ------------------------------------------------------------------
 const G = { state: 'title', difficulty: 100, studySeen: {}, studyTick: 0, strain: 'anc', levelIdx: 0, startLevel: 0, score: 0, results: [], toast: '', toastT: 0, best: loadBest(), seen: {}, shake: 0, menuIdx: 0 };
 G.ghostOn = true;
+G.calm = loadCalm();   // reduce motion (effects.js)
 // mode: 'story' (the four maps in order), 'daily' or 'log' (see modes.js).
 Object.assign(G, { mode: 'story', titleMode: 'story', deaths: 0, met: {}, codexIdx: 0, resultT: 0, shakeT: 0 });
 let L = null;  // the running level
@@ -210,7 +224,22 @@ function setState(s) {
   AUDIO.music(fromTitle ? 'title' : !L ? 'title' : L.bossActive && !L.bossDown ? 'boss' : L.def.name);
   AUDIO.duck(s === 'paused' || s === 'codex');
   if (s !== 'play' && s !== 'paused') { AUDIO.muffle(false); AUDIO.intensity(0); }
-  if (s === 'title') { G.iris = 45; G.mode = 'story'; }
+  if (s === 'title') { G.iris = 45; G.mode = 'story'; if (G.firstRun) markWelcomed(); }
+}
+
+// First visit: skip the busy title screen and go straight into TSB as anc on Normal.
+// The full menu (strains, levels, modes) opens after the first level is cleared, or
+// whenever the player picks "Main menu" in the pause menu. A race link skips this.
+const WELCOME_KEY = 'je2jump_welcomed';
+function welcomed() { try { return localStorage.getItem(WELCOME_KEY) === '1'; } catch { return true; } }
+function markWelcomed() {
+  G.firstRun = false;
+  try { localStorage.setItem(WELCOME_KEY, '1'); } catch { /* private mode: the menu still opens */ }
+}
+function startFirstRun() {
+  Object.assign(G, { firstRun: true, difficulty: 100, strain: 'anc', titleMode: 'story', startLevel: 0 });
+  syncDifficultyControl();
+  startGame();
 }
 
 // Start at the level picked on the title screen; later levels follow in order.
@@ -287,6 +316,9 @@ function setStageWorld(b, stage) {
   });
   L.art = buildLevelArt(b, L.def.theme, L.artSeed);
   L.partArt[stage] = L.art.tiles;   // kept for the attempt replay at the end of the map
+  // The goal checklist shows for 5 s at the start of every part (then on changes);
+  // control hints show for 8 s.
+  L.goalShowT = 300; L.goalSig = undefined; L.hintT = 480;
   for (const e of L.ents) initEntity(e);
   const start = L.ents.find(e => e.type === 'start');
   L.respawn = { x: start.x + 4, y: start.y + 4 };
@@ -311,20 +343,8 @@ function enterStage(stage) {
 }
 
 function initEntity(e) {
-  switch (e.type) {
-    case 'lasa': e.w = 28; e.h = 22; e.y = e.ty * TILE + TILE - e.h; e.vx = -1.1; break;
-    case 'sidero': e.hx = e.x + 16; e.hy = e.y + 16; e.cx = e.hx; e.cy = e.hy; e.cool = 0; break;
-    case 'hqno': e.cx = e.x + 16; e.cy = e.y + 16; break;   // drawn before its first update
-    case 'vent': e.cool = 20; e.rise = e.rise || 10; break;
-    case 'omv': e.vx = 1.5; e.vy = 0; break;
-    case 'lasb': case 'pa': e.hx = e.x + 16; e.hy = e.y + 16; e.cx = e.hx; e.cy = e.hy; e.ang = 0; break;
-    case 'twitch': e.dir = -1; break;
-    case 'geyser': e.h = e.h || 3; e.phase = e.phase || 0; break;
-    case 'drift': e.dx = e.dx || 0; e.dy = e.dy || 0; e.per = e.per || 240; e.phase = e.phase || 0; e.cx = e.x + 16; e.cy = e.y + 16; break;
-    case 'spring': e.cool = 0; e.sq = 0; break;
-    case 'rosgun': e.cool = 60 + (e.tx * 37) % 120; break;
-    case 'boss': Object.assign(e, { bx: e.x + 16, by: (e.ty + 1) * TILE, hp: 20, maxHp: 20, state: 'idle', timer: 0, dir: 1, open: 0, vy: 0, jy: 0, hitT: 0, cycle: 0 }); break;
-  }
+  const kind = ENTITY[e.type];   // see entities.js
+  if (kind && kind.init) kind.init(e);
 }
 // New enemies appear at the end of the entity update (coughs, the boss, launchers).
 function spawnEnemy(type, x, y, extra = {}) {
@@ -490,14 +510,9 @@ function updateShots() {
 
 // ---- enemies: hit boxes, stomping, neutralising ------------------------------------
 function enemyBox(e) {
-  switch (e.type) {
-    case 'lasa': return { x: e.x, y: e.y, w: e.w, h: e.h };
-    case 'omv': return { x: e.x + 5, y: e.y + 5, w: 22, h: 22 };
-    case 'twitch': return { x: e.x + 2, y: e.y + 17, w: 28, h: 15 };
-    case 'sidero': return { x: e.cx - 12, y: e.cy - 12, w: 24, h: 24 };
-    case 'rosb': return { x: e.x + 2, y: e.y + 9, w: 28, h: 14 };
-    default: return { x: e.cx - 13, y: e.cy - 9, w: 26, h: 18 };   // lasb, pa
-  }
+  const kind = ENTITY[e.type];
+  if (kind && kind.box) return kind.box(e);
+  return { x: e.cx - 13, y: e.cy - 9, w: 26, h: 18 };   // lasb, pa
 }
 const ENEMY_COL = { lasa: '#b8404c', omv: '#8fb6e8', lasb: '#2f8f86', pa: '#5fae4f', twitch: '#5fae4f', sidero: '#c8e85a', rosb: '#ff7a3c' };
 // Foam geyser cycle (frames): rest, bubbling warning, then the column rises, holds and sinks.
@@ -713,18 +728,22 @@ function updateCough() {
 }
 
 // ---- level goals -------------------------------------------------------------------
+// Goals that are met by walking into the MS (or the sputum sample) itself.
+const REACH_GOALS = new Set(['sample', 'time']);
+function atSample() {
+  const goal = L.ents.find(e => e.type === 'goal');
+  return !!goal && overlap(P, { x: goal.x, y: goal.y - TILE, w: TILE * 2, h: TILE * 2 });
+}
 function goalStatus(g) {
   switch (g.id) {
-    case 'sample': {
-      const goal = L.ents.find(e => e.type === 'goal');
-      return { done: !!goal && overlap(P, { x: goal.x, y: goal.y - TILE, w: TILE * 2, h: TILE * 2 }), text: g.label };
-    }
+    case 'sample': return { done: atSample(), text: g.label };
     case 'cys': return { done: L.cystine >= g.n, text: `${g.label} (${Math.min(L.cystine, g.n)}/${g.n})` };
     case 'pep': return { done: L.peptides >= L.totalPep, text: `${g.label} (${L.peptides}/${L.totalPep})` };
     case 'reps': return { done: P.reps === 3 && L.retries === 0, text: g.label };
     case 'kills': return { done: L.kills >= g.n, text: `${g.label} (${Math.min(L.kills, g.n)}/${g.n})` };
     case 'boss': return { done: L.bossDown, text: g.label };
-    case 'time': return { done: true, text: L.difficulty === 0 ? 'Reach the MS (study: no deadline)' : g.label };
+    // Done only at the MS: running out of pulse time ends the run before that.
+    case 'time': return { done: atSample(), text: L.difficulty === 0 ? 'Reach the MS (study: no deadline)' : g.label };
     default: return { done: true, text: g.label };
   }
 }
@@ -846,6 +865,7 @@ function finishLysis() {
 }
 function hurt(kind, msg) {
   if (P.inv > 0) return;
+  logDeath(kind);   // playtest log (playtest.js), also for protected Study hits
   if (L.difficulty === 0) {
     P.inv = 180; P.damageT = 75; P.damageLabel = 'STUDY · PROTECTED';
     return;
@@ -917,7 +937,9 @@ function updatePlay() {
   const slowF = (P.slow > 0 ? 0.55 : 1) * (P.sticky ? 0.45 : 1);
   const jumpF = (P.slow > 0 ? 0.85 : 1) * (P.sticky ? 0.8 : 1);
   const dir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
-  if (dir) { P.vx += dir * RUN_ACC; P.face = dir; } else P.vx *= FRICTION;
+  // Ground friction stops you quickly; air friction lets a jump carry. Right after
+  // a hit the knockback is damped as on the ground, so it cannot throw you far.
+  if (dir) { P.vx += dir * RUN_ACC; P.face = dir; } else P.vx *= P.onGround || P.dizzy > 60 ? FRICTION : AIR_FRICTION;
   P.vx = clamp(P.vx, -RUN_MAX * M.run * slowF, RUN_MAX * M.run * slowF);
   if (P.dash > 0) { P.vx = P.face * 9 * slowF; P.dash--; }
   if (Math.abs(P.vx) < 0.05) P.vx = 0;
@@ -947,7 +969,7 @@ function updatePlay() {
     }
   }
   if (!keys.jump && !P.sprung && P.vy < -3.5) P.vy = -3.5;   // let go early = lower jump (not after a bounce)
-  P.vy = Math.min(P.vy + GRAV * M.grav, MAX_FALL);
+  P.vy = fallStep(P.vy, keys.jump && !P.sprung, GRAV * M.grav);
   if (took('down') && !P.onGround) startDive();
   if (P.diving) P.vy = DIVE_V;
   else if (P.dash > 0 && !P.onGround) P.vy = Math.min(P.vy, 0.4);   // an air dash hangs
@@ -1003,7 +1025,7 @@ function updatePlay() {
   if (inFoam()) hurt('foam', 'Rhamnolipid foam damaged your membrane.');
   if (G.state !== 'play') return;
   if (P.y > L.rows * TILE + 64) {
-    P.inv = 0;
+    P.inv = 0; logDeath('fall');
     G.shake = 8; AUDIO.play('hurt');
     loseReplicate('You fell out of the culture.', !!G.seen.fell);
     G.seen.fell = true;
@@ -1044,6 +1066,11 @@ function updatePlay() {
     }
   }
   for (const [k, a] of L.jiggle) { if (a < 0.2) L.jiggle.delete(k); else L.jiggle.set(k, a * 0.92); }
+  // Show the goal checklist again for 4 s whenever one of the goals changes.
+  const sig = L.def.goals.map(g => { const s = goalStatus(g); return s.done + s.text; }).join('|');
+  if (sig !== L.goalSig) { if (L.goalSig !== undefined) L.goalShowT = Math.max(L.goalShowT, 240); L.goalSig = sig; }
+  if (L.goalShowT > 0) L.goalShowT--;
+  if (L.hintT > 0) L.hintT--;
   if (G.toastT > 0) G.toastT--;
   if (L.goalMsgT > 0) L.goalMsgT--;
   if (L.comboT > 0) L.comboT--;
@@ -1070,295 +1097,8 @@ function updateEntities() {
       if (e.y > L.rows * TILE) e.alive = false;
     }
     const cx = e.x + 16, cy = e.y + 16;
-    switch (e.type) {
-      case 'peptide':
-        if (dist(cx, cy, pcx, pcy) < 24) {
-          e.alive = false; L.peptides++;
-          gain(300, cx, cy, '#9fe7ff');
-          burst(cx, cy, '#9fe7ff', 18, 3); ring(cx, cy, 6, 44, '#9fe7ff', 20);
-          flyToHud('score', cx, cy);
-          AUDIO.play('peptide');
-          tag(`PEPTIDE ${L.peptides}/${L.totalPep}`, cx, cy - 24, '#9fe7ff', 130);
-          meet('peptide'); codexPeptide(e);
-        }
-        break;
-      case 'psm':
-        if (dist(cx, cy, pcx, pcy) < 26) {
-          e.alive = false; P.ammo = Math.min(MAX_AMMO, P.ammo + 12);
-          burst(cx, cy, '#e88ad0', 14, 3); AUDIO.play('power'); P.happy = 40;
-          tag(G.seen.psm ? '+12 PSM' : '+12 PSM · X / K / SHIFT TO SHOOT', cx, cy - 24, '#f3b6e2', 170);
-          G.seen.psm = true; meet('psm');
-        }
-        break;
-      case 'xan':
-        if (dist(cx, cy, pcx, pcy) < 26) {
-          e.alive = false; P.gold = 60 * 12;
-          burst(cx, cy, '#ffd84a', 18, 3.4); AUDIO.play('power'); P.happy = 40;
-          tag('STAPHYLOXANTHIN · ROS-PROOF 12 s', cx, cy - 24, '#ffd84a', 160);
-          meet('xan');
-        }
-        break;
-      case 'secret':   // a golden cluster in a hidden room
-        if (dist(cx, cy, pcx, pcy) < 28) {
-          e.alive = false; L.points += 1000; L.secret = true; P.happy = 60;
-          burst(cx, cy, '#ffe066', 30, 4); ring(cx, cy, 8, 80, '#ffe066', 28, 4); ring(cx, cy, 4, 50, '#ffffff', 20, 2);
-          flyToHud('score', cx, cy);
-          bigText('SECRET FOUND!', cx, cy - 30, '#ffe066', 90);
-          AUDIO.play('secret'); G.shake = Math.max(G.shake, 4);
-          meet('secret'); codexSecret();
-        }
-        break;
-      case 'spring': // a swollen cell: land on it and it throws you up
-        if (e.sq > 0) e.sq--;
-        if (P.vy >= 0 && Math.abs(pcx - cx) < 20 && P.y + P.h >= e.y + 14 && P.y + P.h <= e.y + TILE + 0.5) {
-          P.y = e.y + 14 - P.h; P.vy = SPRING_V; P.onGround = false; P.coyote = 0; P.ride = null; P.sprung = true; P.diving = false;
-          P.squash = -0.3; e.sq = 14;
-          AUDIO.play('boing');
-          tagOnce('spring', 'BOING!', '#ffe9c4');
-        }
-        break;
-      case 'omv': { // outer membrane vesicle: bounces along
-        e.vy = Math.min(e.vy + 0.35, 9);
-        const nx = e.x + e.vx;
-        if (enemySolid(tileAt(Math.floor((e.vx > 0 ? nx + 27 : nx + 5) / TILE), Math.floor((e.y + 16) / TILE)))) e.vx = -e.vx; else e.x = nx;
-        const prevB = e.y + 27;
-        e.y += e.vy;
-        const col = Math.floor((e.x + 16) / TILE), R = Math.floor((e.y + 27) / TILE), c = tileAt(col, R);
-        if (e.vy > 0 && (enemySolid(c) || oneWay(c)) && prevB <= R * TILE + 1) { e.y = R * TILE - 27; e.vy = -7.2; }
-        if (e.vy < 0 && isSolid(tileAt(col, Math.floor((e.y + 5) / TILE)))) e.vy = 1;
-        if (e.y > L.rows * TILE) e.alive = false;
-        enemyContact(e, 'An outer membrane vesicle (OMV) of P. aeruginosa delivered its cargo into you.');
-        break;
-      }
-      case 'boss': updateBoss(e, pcx); break;
-      case 'glob': { // a pyocyanin glob spat by the boss
-        e.vy = Math.min(e.vy + 0.3, 9); e.x += e.vx; e.y += e.vy;
-        if (isSolid(tileAt(Math.floor((e.x + 16) / TILE), Math.floor((e.y + 20) / TILE))) || e.y > L.rows * TILE) {
-          e.alive = false; burst(e.x + 16, e.y + 16, '#3d86d9', 6, 1.8, 0.1, 18); break;
-        }
-        if (overlap(P, { x: e.x + 9, y: e.y + 9, w: 14, h: 14 })) {
-          e.alive = false;
-          if (P.dash > 0 || P.diving) burst(e.x + 16, e.y + 16, '#3d86d9', 8, 2.4, 0.1, 18);
-          else hurt('ros', 'Pyocyanin from the colony made ROS in your cell.');
-        }
-        break;
-      }
-      case 'rosgun': { // pyocyanin redox launcher: fires superoxide radicals at you
-        if (e.cool > 0) e.cool--;
-        const dx = pcx - cx;
-        e.face = dx >= 0 ? 1 : -1;
-        if (e.cool === 0 && Math.abs(dx) > 40 && Math.abs(dx) < 620 && Math.abs(pcy - cy) < 150) {
-          e.cool = e.exposed ? 115 : 170;
-          spawnEnemy('rosb', cx + e.face * 20, cy - 4, { vx: e.face * 3.2 });
-          burst(cx + e.face * 18, cy - 4, '#ffb36b', 8, 2, 0, 16);
-          AUDIO.play('shoot');
-          if (!G.seen.rosgun) { G.seen.rosgun = true; tag('SUPEROXIDE! JUMP, STOMP OR SHOOT', cx, cy - 30, '#ffb36b', 170); }
-        }
-        break;
-      }
-      case 'rosb': { // a superoxide radical flying straight ahead
-        e.x += e.vx;
-        if (enemySolid(tileAt(Math.floor((e.x + 16 + Math.sign(e.vx) * 14) / TILE), Math.floor((e.y + 16) / TILE))) || e.t > 420) {
-          e.alive = false; burst(e.x + 16, e.y + 16, '#ff7a3c', 10, 2.2, 0.05, 20); break;
-        }
-        enemyContact(e, 'A superoxide radical (ROS) hit you.', 'ros');
-        break;
-      }
-      case 'lasb': // LasB elastase: a protease that drifts in loops
-        e.cx = e.hx + Math.sin(e.t * 0.022) * 90; e.cy = e.hy + Math.sin(e.t * 0.05) * 24;
-        e.face = Math.cos(e.t * 0.022) >= 0 ? 1 : -1;
-        enemyContact(e, 'LasB elastase, another P. aeruginosa protease, hit you.');
-        break;
-      case 'hcn': { // a vent that puffs hydrogen cyanide now and then
-        const ph = e.t % 220;
-        e.warn = ph > 110 && ph <= 140; e.active = ph > 140;
-        if (e.warn && dist(cx, cy, pcx, pcy) < 260) meet('hcn');
-        if (e.active && overlap(P, { x: e.x - 18, y: e.y - 60, w: 68, h: 92 })) hurt('hcn', 'HCN (hydrogen cyanide) blocked your respiration.');
-        break;
-      }
-      case 'geyser': { // rhamnolipid foam that wells up in a column, with a bubbling warning first
-        const s = foamGeyserState(e);
-        e.warn = s.warn; e.active = s.height > 0;
-        if (e.warn && dist(cx, cy, pcx, pcy) < 220) meet('foam');
-        if (e.active && overlap(P, { x: e.x + 5, y: e.y + TILE - s.height, w: 22, h: s.height })) hurt('foam', 'A column of rhamnolipid foam damaged your membrane.');
-        break;
-      }
-      case 'drift': { // a clump of rhamnolipid foam drifting along a fixed path
-        const a = (e.t + e.phase) / e.per * TAU;
-        e.cx = e.x + 16 + Math.sin(a) * e.dx * TILE; e.cy = e.y + 16 + Math.sin(a) * e.dy * TILE;
-        if (overlap(P, { x: e.cx - 12, y: e.cy - 11, w: 24, h: 22 })) hurt('foam', 'Drifting rhamnolipid foam damaged your membrane.');
-        break;
-      }
-      case 'pa': { // a living P. aeruginosa cell (CF level only): swims towards you
-        const d = dist(pcx, pcy, e.cx, e.cy);
-        let tx = e.hx + Math.sin(e.t * 0.02) * 50, ty = e.hy + Math.cos(e.t * 0.03) * 20;
-        if (d < 260) { tx = pcx; ty = pcy; }
-        const hd = dist(tx, ty, e.hx, e.hy);
-        if (hd > 180) { tx = e.hx + (tx - e.hx) / hd * 180; ty = e.hy + (ty - e.hy) / hd * 180; }
-        const dd = dist(tx, ty, e.cx, e.cy), sp = d < 260 ? 1.25 : 0.6;
-        if (dd > 1) { e.cx += (tx - e.cx) / dd * sp; e.cy += (ty - e.cy) / dd * sp; e.ang = Math.atan2(ty - e.cy, tx - e.cx); }
-        enemyContact(e, 'A P. aeruginosa cell attacked you.');
-        break;
-      }
-      case 'twitch': { // P. aeruginosa crawling with its pili (CF level only): jerky moves
-        if (e.t % 50 < 16) {
-          const nx = e.x + e.dir * 2.6, front = e.dir > 0 ? nx + 30 : nx + 2;
-          const ftx = Math.floor(front / TILE), fty = Math.floor((e.y + 31) / TILE);
-          const ahead = tileAt(ftx, fty), below = tileAt(ftx, fty + 1);
-          if (enemySolid(ahead) || ahead === '^' || !(enemySolid(below) || oneWay(below))) e.dir = -e.dir; else e.x = nx;
-        }
-        enemyContact(e, 'A twitching P. aeruginosa cell pulled itself into you.');
-        break;
-      }
-      case 'cystine':
-        if (P.magnet > 0 && dist(cx, cy, pcx, pcy) < 170) {
-          const d = dist(cx, cy, pcx, pcy) || 1;
-          e.x += (pcx - cx) / d * 5; e.y += (pcy - cy) / d * 5;
-        }
-        if (dist(cx, cy, pcx, pcy) < 24) {
-          e.alive = false; L.cystine++;
-          AUDIO.play('cys', gain(100, cx, cy, '#ffe36a'));
-          burst(cx, cy, '#f5d33a', 12, 2.6);
-          flyToHud('cys', cx, cy);
-          meet('cystine');
-        }
-        break;
-      case 'iron':
-        if (dist(cx, cy, pcx, pcy) < 24) {
-          e.alive = false; L.ironTotal++; L.ironBank++;
-          AUDIO.play('iron', gain(50, cx, cy, '#ff9a62'));
-          burst(cx, cy, '#e0743c', 12, 2.6);
-          flyToHud('iron', cx, cy);
-          meet('iron');
-          if (L.ironBank >= 3) {
-            L.ironBank = 0;
-            if (P.reps < L.maxReps) { P.reps++; P.repFlash = 0; tag('3 Fe · +1 REPLICATE', pcx, pcy - 30, '#9be89f', 150); ring(pcx, pcy, 6, 50, '#9be89f', 22); }
-            else { L.points += 300; tag('3 Fe · +300', pcx, pcy - 30, '#ffb27a', 120); }
-          }
-        }
-        break;
-      case 'ahpc':
-        if (dist(cx, cy, pcx, pcy) < 26) {
-          e.alive = false; P.shield = 60 * 20; burst(cx, cy, '#7fb6ff', 14, 3); AUDIO.play('power'); P.happy = 40;
-          tag('AhpC SHIELD · BLOCKS ONE ROS HIT', cx, cy - 24, '#9cc6ff', 150); meet('ahpc');
-        }
-        break;
-      case 'tcya':
-        if (dist(cx, cy, pcx, pcy) < 26) {
-          e.alive = false; P.magnet = 60 * 12; burst(cx, cy, '#f0c850', 14, 3); AUDIO.play('power'); P.happy = 40;
-          tag('TcyA · CYSTINE MAGNET 12 s', cx, cy - 24, '#f0c850', 150); meet('tcya');
-        }
-        break;
-      case 'check':
-        if (e.on && e.fillT !== undefined && e.fillT < 30) e.fillT++;
-        if (!e.on && Math.abs(cx - pcx) < 20 && Math.abs(cy - pcy) < 40) {
-          for (const o of L.ents) if (o.type === 'check') o.on = false;
-          e.on = true; e.fillT = 0; L.respawn = { x: e.x + 4, y: e.y + 4 };
-          if (!e.saved) { e.saved = true; L.stocks++; }
-          burst(cx, cy, '#bfe6ff', 14, 2.4, -0.03); ring(cx, cy, 6, 46, '#bfe6ff', 22);
-          AUDIO.play('check');
-          tag('STOCK SAVED', cx, cy - 34, '#bfe6ff', 110);
-          captureCheckpoint();
-        }
-        break;
-      case 'stage': // the gate to part 2: a checkpoint that moves the run on
-        if (overlap(P, { x: e.x, y: e.y - TILE, w: TILE * 2, h: TILE * 2 })) {
-          if (G.mode === 'daily') { finishLevel(); return; }   // a daily challenge is one part only
-          enterStage(L.stage + 1); return;
-        }
-        break;
-      case 'goal': {
-        const box = { x: e.x, y: e.y - TILE, w: TILE * 2, h: TILE * 2 };
-        if (overlap(P, box)) {
-          const miss = missingGoals();
-          if (!miss.length) finishLevel();
-          else if (L.goalMsgT === 0) {
-            toast(`${L.def.goalKind === 'sputum' ? 'The sample' : 'The MS'} is not ready yet. Still to do: ${miss.map(g => goalStatus(g).text).join(' · ')}`, 220);
-            L.goalMsgT = 180;
-          }
-        }
-        break;
-      }
-      case 'dripper':
-        // Wait until the player is near, then drop pyocyanin every ~1.6 s.
-        if (Math.abs(cx - pcx) < VIEW_W * 0.7 && Math.abs(cy - pcy) < VIEW_H && e.t % (e.exposed ? 60 : 80) === 0) {
-          spawned.push({ type: 'drop', x: e.x + 12, y: e.y + 26, vy: 0, alive: true, t: 0 });
-          meet('drop');
-        }
-        break;
-      case 'drop': {
-        e.vy = Math.min(e.vy + 0.25, 8); e.y += e.vy;
-        if (tileAt(Math.floor((e.x + 4) / TILE), Math.floor((e.y + 8) / TILE)) !== ' ' || e.y > L.rows * TILE ||
-            L.solids.some(r => overlap({ x: e.x, y: e.y, w: 8, h: 10 }, r))) {
-          e.alive = false;
-          burst(e.x + 4, e.y + 6, '#3d86d9', 5, 1.5, 0.1, 18);
-          break;
-        }
-        if (overlap(P, { x: e.x, y: e.y, w: 8, h: 10 })) {
-          e.alive = false;
-          hurt('ros', 'Pyocyanin made ROS in your cell.');
-        }
-        break;
-      }
-      case 'hqno': {
-        e.cx = cx + Math.sin(e.t * 0.02) * 70; e.cy = cy + Math.sin(e.t * 0.031) * 22;
-        if (dist(e.cx, e.cy, pcx, pcy) < 46) {
-          if (P.slow === 0) { tagOnce('hqno', 'HQNO · SLOWER, WEAKER JUMPS', '#c9e59a'); meet('hqno'); }
-          P.slow = 150;
-        }
-        break;
-      }
-      case 'lasa': {
-        // Patrol; charge when the player is close on the same level. Turn at walls, ledges, foam.
-        const ex = e.x + e.w / 2, ey = e.y + e.h / 2;
-        e.angry = Math.abs(pcy - ey) < 30 && Math.abs(pcx - ex) < 190 && P.inv === 0;
-        // it winds up for a moment before it charges (a fair warning)
-        if (e.angry && !e.wasAngry) e.windup = 14;
-        e.wasAngry = e.angry;
-        if (e.windup > 0) {
-          e.windup--;
-          e.vx = (Math.sign(pcx - ex) || 1) * 0.01;
-          enemyContact(e, 'LasA protease cut into your cell wall.');
-          break;
-        }
-        e.vx = e.angry ? (Math.sign(pcx - ex) || 1) * 2.7 : Math.sign(e.vx) * 1.3;
-        const nx = e.x + e.vx;
-        const front = e.vx < 0 ? nx : nx + e.w;
-        const ftx = Math.floor(front / TILE), fty = Math.floor((e.y + e.h - 1) / TILE);
-        const ahead = tileAt(ftx, fty), below = tileAt(ftx, fty + 1);
-        if (enemySolid(ahead) || ahead === '^' || !(enemySolid(below) || oneWay(below))) e.vx = -e.vx; else e.x = nx;
-        enemyContact(e, 'LasA protease cut into your cell wall.');
-        break;
-      }
-      case 'sidero': {
-        if (e.cool > 0) e.cool--;
-        // Wake up when the player is near, then hunt the nearest free iron.
-        let target = null;
-        if (Math.abs(e.hx - pcx) < 420 && Math.abs(e.hy - pcy) < 320) {
-          let best = 360;
-          for (const o of L.ents) if (o.alive && o.type === 'iron') {
-            const d = dist(o.x + 16, o.y + 16, e.cx, e.cy);
-            if (d < best) { best = d; target = o; }
-          }
-        }
-        const tx = target ? target.x + 16 : e.hx + Math.sin(e.t * 0.03) * 30;
-        const ty = target ? target.y + 16 : e.hy + Math.cos(e.t * 0.05) * 12;
-        const d = dist(tx, ty, e.cx, e.cy) || 1;
-        const sp = target ? 1.25 : 0.8;
-        if (d > 1) { e.cx += (tx - e.cx) / d * Math.min(sp, d); e.cy += (ty - e.cy) / d * Math.min(sp, d); }
-        if (target && dist(target.x + 16, target.y + 16, e.cx, e.cy) < 14) {
-          target.alive = false;
-          burst(e.cx, e.cy, '#c8e85a', 10, 2);
-          if (!G.seen.sidero) { G.seen.sidero = true; tag('IRON GRABBED · COMPETITION FOR Fe', e.cx, e.cy - 26, '#c8e85a', 160); }
-        }
-        if (e.cool === 0 && dist(e.cx, e.cy, pcx, pcy) < 26) {
-          e.cool = 120;
-          if (L.ironBank > 0) { L.ironBank--; toast('A siderophore pulled iron out of your store.', 140); }
-          e.cx += (e.cx - pcx) * 1.5; e.cy -= 20;
-        }
-        break;
-      }
-    }
+    const kind = ENTITY[e.type];
+    if (kind && kind.update && kind.update(e, cx, cy, pcx, pcy, spawned)) return;   // the gate moved the run on
   }
   if (spawned.length) L.ents.push(...spawned);
   if (L.spawnQ.length) { L.ents.push(...L.spawnQ); L.spawnQ = []; }
@@ -1370,6 +1110,7 @@ function finishLevel() {
   endAttempt('clear');
   if (G.mode === 'daily') { finishDaily(); return; }
   if (G.mode === 'log') { finishLogPhase(true); return; }
+  if (G.firstRun) markWelcomed();   // the first clear opens the full menu for next time
   const timeBonus = L.timeLimit ? Math.max(0, Math.round((L.timeLimit - L.time / 60) * 20)) : 0;
   const repBonus = P.reps * 500;
   const total = L.points + timeBonus + repBonus;
@@ -1404,11 +1145,11 @@ function menuEntries() {
   else entries.push([L.difficulty === 0 ? 'Retry checkpoint (free)' : 'Retry checkpoint (+3 s)', 'retry'],
     [L.stage > 0 ? `Restart part ${L.stage + 1}` : 'Restart level', 'restart']);
   entries.push([`Sound effects: ${AUDIO.sfxOn ? 'on' : 'off'}`, 'sfx'], [`Music: ${AUDIO.musicOn ? 'on' : 'off'}`, 'music'],
-    ['Codex', 'codex'], ['Main menu', 'menu']);
+    [`Screen shake & flashes: ${G.calm ? 'off' : 'on'}`, 'calm'], ['Codex', 'codex'], ['Main menu', 'menu']);
   return entries;
 }
 function menuItems() { return menuEntries().map(e => e[0]); }
-function menuRects() { return menuItems().map((_, i) => ({ x: VIEW_W / 2 - 170, y: 156 + i * 40, w: 340, h: 35 })); }
+function menuRects() { return menuItems().map((_, i) => ({ x: VIEW_W / 2 - 170, y: 156 + i * 36, w: 340, h: 31 })); }
 function menuSelect() {
   AUDIO.play('click');
   switch (menuEntries()[G.menuIdx][1]) {
@@ -1417,6 +1158,7 @@ function menuSelect() {
     case 'restart': if (L.stage > 0) restartPart(); else { loadLevel(G.levelIdx); setState('intro'); } break;
     case 'sfx': AUDIO.toggleSfx(); break;
     case 'music': AUDIO.toggleMusic(); break;
+    case 'calm': toggleCalm(); break;
     case 'codex': openCodex('paused'); break;
     case 'menu': G.startLevel = Math.max(0, G.levelIdx); setState('title'); break;
   }
@@ -1461,6 +1203,7 @@ function update() {
   if (took('music')) AUDIO.toggleMusic();
   if (took('ghost')) G.ghostOn = !G.ghostOn;
   if (took('photo')) saveMicrograph();
+  if (took('json')) exportDeaths();
   switch (G.state) {
     case 'title': updateTitle(); break;
     case 'codex': updateCodex(); break;
@@ -1468,7 +1211,8 @@ function update() {
       if (took('ok') || took('jump')) setState('play');
       break;
     case 'play':
-      if (took('pause')) { G.menuIdx = 0; setState('paused'); AUDIO.play('click'); break; }
+      // A phone turned upright pauses the game behind the "turn sideways" prompt.
+      if (took('pause') || PORTRAIT_PHONE.matches) { G.menuIdx = 0; setState('paused'); AUDIO.play('click'); break; }
       if (L.difficulty < 100) {
         syncStudyStation();
         if (took('biology')) toggleStudyStation();
@@ -2258,27 +2002,28 @@ function drawSignText(cx, cy) {
   const s = L.signShown, a = L.signA || 0;
   if (!s || a <= 0.01) return;
   const x = s.tx * TILE + 16 - cx, y = s.ty * TILE + 12 - cy;
-  const lines = wrap(s.text, 268, 13);
+  const lines = wrap(s.text, 268, 13), u = uiScale();
   const h = lines.length * 17 + 14, w = 290;
-  const bx = clamp(x - w / 2, 8, VIEW_W - w - 8);
-  let by = y - 30 - h + (1 - a) * 8;
+  const bx = clamp(x - w * u / 2, 8, VIEW_W - w * u - 8);
+  let by = y - 30 - h * u + (1 - a) * 8;
   if (by < 100) by = y + 28 - (1 - a) * 8;   // keep clear of the HUD bar
   ctx.save();
   ctx.globalAlpha = a;
-  roundRect(bx, by, w, h, 10, 'rgba(12,26,34,0.55)', 'rgba(255,255,255,0.28)', 1);
+  ctx.translate(bx, by); ctx.scale(u, u);
+  roundRect(0, 0, w, h, 10, 'rgba(12,26,34,0.55)', 'rgba(255,255,255,0.28)', 1);
   ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 3;   // readable on the translucent panel
-  lines.forEach((ln, i) => text(ln, bx + 12, by + 21 + i * 17, { size: 13, color: '#f2f8f6', weight: '600' }));
+  lines.forEach((ln, i) => text(ln, 12, 21 + i * 17, { size: 13, color: '#f2f8f6', weight: '600' }));
   ctx.restore();
 }
 
 const LERP_FIELDS = ['x', 'y', 'cx', 'cy', 'bx', 'jy', 't'];
-// Study steps the world less often than it draws; remember where everything was.
+// The world steps less often than the screen draws (always on fast screens, and in
+// Study also on 60 Hz ones); remember where everything was before each step.
 function snapshotEntities() {
-  if (L.difficulty >= 100) return;
   for (const e of L.ents) e.pv = LERP_FIELDS.map(k => e[k]);
 }
 function drawEntities(cx, cy) {
-  const r = L.difficulty < 100 ? clamp(L.worldAcc, 0, 1) : 1;
+  const r = L.difficulty < 100 ? clamp(L.worldAcc, 0, 1) : (G.alpha ?? 1);
   for (const e of L.ents) {
     if (!e.alive || e.type === 'start') continue;
     if (e.type !== 'boss' && (e.x < cx - 140 || e.x > cx + VIEW_W + 140 || e.y < cy - 140 || e.y > cy + VIEW_H + 140)) continue;
@@ -2295,382 +2040,8 @@ function drawEntities(cx, cy) {
 }
 // One entity at its world position (also used for the codex icons).
 function drawEntity(e) {
-  const x = e.x, y = e.y;
-  const bob = Math.sin((e.t + e.tx * 13) * 0.08) * 3;
-  {
-    switch (e.type) {
-      case 'secret': drawSecret(x + 16, y + 16 + bob, e.t); break;
-      case 'landmark': {
-        ctx.font = `800 14px ${FONT}`;
-        const w = ctx.measureText(e.label).width + 30;
-        roundRect(x + 16 - w / 2, y + 2, w, 29, 14, 'rgba(14,36,45,0.72)');
-        text(e.label, x + 16, y + 22, { size: 14, color: '#effff5', align: 'center', weight: '800' });
-        break;
-      }
-      case 'cystine': { // two S atoms bonded: S–S, with an occasional twinkle
-        glow(x + 16, y + 16 + bob, 20, '#ffd84a', 0.35);
-        drawCystineIcon(x + 16, y + 16, 1, bob);
-        const tw = (e.t + e.tx * 17) % 100;
-        if (tw < 16) {
-          const k = Math.sin(tw / 16 * Math.PI) * 6, sx = x + 25, sy = y + 8 + bob;
-          ctx.fillStyle = 'rgba(255,255,255,0.95)';
-          ctx.beginPath(); ctx.ellipse(sx, sy, k, k * 0.18, 0, 0, TAU); ctx.fill();
-          ctx.beginPath(); ctx.ellipse(sx, sy, k * 0.18, k, 0, 0, TAU); ctx.fill();
-        }
-        break;
-      }
-      case 'iron':
-        glow(x + 16, y + 16 + bob, 20, '#ff8a4a', 0.35);
-        drawIronIcon(x + 16, y + 16 + bob);
-        break;
-      case 'ahpc': { // a globular protein
-        const yy = y + 16 + bob, pulse = 1 + Math.sin(e.t * 0.1) * 0.08;
-        glow(x + 16, yy, 26 * pulse, '#5aa0ff', 0.4);
-        for (const [dx, dy, r] of [[-6, -3, 8], [6, -4, 8], [0, 5, 9], [-8, 6, 6], [8, 5, 6]]) ball(x + 16 + dx, yy + dy, r, '#cfe3ff', '#4f8fe0', '#24538f');
-        text('AhpC', x + 16, yy + 4, { size: 10, color: '#fff', align: 'center', weight: '800' });
-        break;
-      }
-      case 'tcya': { // substrate-binding protein: two lobes holding a cystine
-        const yy = y + 16 + bob, open = 0.35 + Math.sin(e.t * 0.08) * 0.15;
-        glow(x + 16, yy, 26, '#ffd24a', 0.4);
-        ctx.save(); ctx.translate(x + 16, yy + 6);
-        for (const sgn of [-1, 1]) {
-          ctx.save(); ctx.rotate(sgn * open);
-          ctx.beginPath(); ctx.ellipse(sgn * 7, -8, 9, 11, 0, 0, TAU);
-          const g = ctx.createRadialGradient(sgn * 4, -12, 1, sgn * 7, -8, 12);
-          g.addColorStop(0, '#fff0b0'); g.addColorStop(1, '#c99512'); ctx.fillStyle = g; ctx.fill();
-          ctx.restore();
-        }
-        ctx.restore();
-        drawCystineIcon(x + 16, yy - 2, 0.45);
-        text('TcyA', x + 16, yy + 22, { size: 9, color: '#6b4d00', align: 'center', weight: '800' });
-        break;
-      }
-      case 'check': { // a cryo-vial: the glycerol stock you restart from
-        const X = x + 10, Y = y + 2;
-        if (e.on) glow(X + 6, Y + 18, 24, '#9fd8ff', 0.55);
-        roundRect(X, Y + 6, 12, 26, [2, 2, 6, 6], 'rgba(235,245,255,0.85)', '#7d93a8', 1.5);
-        // the vial fills with golden culture when the stock is saved
-        const fill = e.on ? Math.min(1, (e.fillT ?? 30) / 30) : 0;
-        roundRect(X + 1.5, Y + 18, 9, 12.5, [0, 0, 5, 5], '#c9d2da');
-        if (fill > 0) {
-          const h = 12.5 * fill;
-          roundRect(X + 1.5, Y + 30.5 - h, 9, h, [0, 0, 5, 5], '#f3c22f');
-          if (fill < 1) for (let k = 0; k < 2; k++) circle(X + 4 + k * 4, Y + 30 - ((e.t * 1.5 + k * 7) % h), 1.2, '#fff6c8');
-        }
-        roundRect(X - 2, Y, 16, 8, 2, e.on ? '#2eaa5c' : '#8a96a3');
-        ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(X + 2, Y + 9, 2, 18);
-        if (e.on) for (let k = 0; k < 3; k++) {
-          const a = e.t * 0.04 + k * 2.1;
-          text('*', X + 6 + Math.cos(a) * 14, Y + 20 + Math.sin(a) * 10, { size: 12, color: '#bfe6ff', align: 'center', weight: '900' });
-        }
-        break;
-      }
-      case 'stage': { // gate to part 2: a large glowing cryo-vial with an arrow
-        const X = x + 16, Y = y - TILE + 4, pulse = 0.5 + 0.5 * Math.sin(e.t * 0.08);
-        glow(X + 8, Y + 30, 46 + pulse * 8, '#9fd8ff', 0.45 + pulse * 0.2);
-        roundRect(X - 12, Y + 12, 40, 46, [4, 4, 12, 12], 'rgba(235,245,255,0.88)', '#7d93a8', 2);
-        roundRect(X - 9, Y + 30, 34, 25, [0, 0, 10, 10], '#f3c22f');
-        roundRect(X - 16, Y, 48, 14, 4, '#2eaa5c', '#1e7a40', 1.5);
-        ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(X - 5, Y + 16, 3, 36);
-        for (let k = 0; k < 3; k++) {
-          const a = e.t * 0.05 + k * 2.1;
-          text('*', X + 8 + Math.cos(a) * 30, Y + 34 + Math.sin(a) * 22, { size: 14, color: '#bfe6ff', align: 'center', weight: '900' });
-        }
-        const ax = X + 8 + Math.sin(e.t * 0.12) * 3;
-        ctx.strokeStyle = '#1e7a40'; ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        ctx.beginPath(); ctx.moveTo(ax - 7, Y + 36); ctx.lineTo(ax + 4, Y + 43); ctx.lineTo(ax - 7, Y + 50); ctx.stroke();
-        roundRect(X - 30, Y - 26, 76, 20, 10, 'rgba(14,36,45,0.85)');
-        text('PART 2 ▶', X + 8, Y - 11, { size: 13, color: '#9fffe0', align: 'center', weight: '900' });
-        break;
-      }
-      case 'goal': { // the LC-MS/MS (or, in the CF level, a sputum sample cup)
-        const miss = missingGoals().length, nReq = L.def.goals.filter(g => g.req).length;
-        const status = () => { if (nReq) text(miss ? `${nReq - miss}/${nReq} goals` : 'ready!', x + TILE, y - TILE - 32, { size: 12, color: miss ? '#a0202f' : '#1b7f3b', align: 'center', weight: '800' }); };
-        if (L.def.goalKind === 'sputum') {
-          const X = x + 4, Y = y - TILE + 4;
-          glow(X + 28, Y + 34, 44, '#ffffff', 0.35);
-          roundRect(X, Y + 10, 56, 50, [4, 4, 12, 12], 'rgba(235,245,255,0.8)', '#8aa0b5', 2);
-          roundRect(X + 3, Y + 34, 50, 23, [0, 0, 10, 10], 'rgba(214,214,110,0.85)');
-          for (let k = 0; k < 4; k++) circle(X + 12 + k * 11, Y + 42 + (k % 2) * 6, 3, 'rgba(255,255,220,0.7)');
-          roundRect(X - 4, Y, 64, 13, 4, '#2f6fd0', '#1d4f99', 1.5);
-          ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(X + 6, Y + 14, 3, 40);
-          text('sputum sample', x + TILE, Y - 8, { size: 11, color: '#1d2733', align: 'center', weight: '800' });
-          status();
-          break;
-        }
-        const X = x - 6, Y = y - TILE - 12, w = 76, h = 76;
-        ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 4;
-        const g = ctx.createLinearGradient(X, Y, X, Y + h);
-        g.addColorStop(0, '#f2f4f7'); g.addColorStop(1, '#aeb5bf');
-        roundRect(X, Y, w, h, 8, g);
-        ctx.restore();
-        roundRect(X, Y, w, h, 8, null, '#69717c', 2);
-        roundRect(X + 6, Y + 8, 8, 58, 3, '#dfe6ee', '#7d8794', 1.2);
-        roundRect(X + 7.5, Y + 12 + (e.t * 0.6) % 44, 5, 8, 2, '#5aa0ff');
-        roundRect(X + 20, Y + 8, 50, 32, 4, '#15202c');
-        ctx.strokeStyle = '#4fe3a1'; ctx.lineWidth = 2; ctx.beginPath();
-        for (let i = 0; i < 9; i++) { const px = X + 25 + i * 5; ctx.moveTo(px, Y + 36); ctx.lineTo(px, Y + 36 - 3 - ((i * 7 + e.t / 6) % 20)); }
-        ctx.stroke();
-        roundRect(X + 24, Y + 48, 42, 12, 4, '#59626e');
-        circle(X + 45, Y + 54, 3.5, '#1c232c');
-        circle(X + 64, Y + 68, 3, Math.floor(e.t / 30) % 2 ? '#2ee07a' : '#1b7f3b');
-        text('LC-MS/MS', x + TILE, Y - 6, { size: 11, color: '#1d2733', align: 'center', weight: '800' });
-        status();
-        break;
-      }
-      case 'dripper': { // pyocyanin: a blue phenazine (three fused rings) that drips
-        const X = x + 16, Y = y + 8;
-        glow(X, Y, 30, '#2b6fd0', 0.35);
-        ctx.fillStyle = 'rgba(70,130,230,0.35)'; ctx.strokeStyle = '#1d4fa0'; ctx.lineWidth = 2;
-        for (const dx of [-11, 0, 11]) { hexagon(X + dx, Y, 6.4, Math.PI / 6); ctx.fill(); ctx.stroke(); }
-        const ph = (e.t % 100) / 100, r = 1 + ph * 3.5;
-        ctx.fillStyle = '#2f7ad8';
-        ctx.beginPath(); ctx.moveTo(X, Y + 6); ctx.quadraticCurveTo(X + r, Y + 8 + r * 1.5, X, Y + 8 + r * 2.4); ctx.quadraticCurveTo(X - r, Y + 8 + r * 1.5, X, Y + 6); ctx.fill();
-        break;
-      }
-      case 'drop': {
-        const g = ctx.createLinearGradient(x, y, x + 8, y + 12);
-        g.addColorStop(0, '#9cc8ff'); g.addColorStop(1, '#1f63c0');
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.moveTo(x + 4, y - 2); ctx.quadraticCurveTo(x + 10, y + 8, x + 4, y + 11); ctx.quadraticCurveTo(x - 2, y + 8, x + 4, y - 2); ctx.fill();
-        circle(x + 2.5, y + 6, 1.4, 'rgba(255,255,255,0.8)');
-        break;
-      }
-      case 'hqno': {
-        const X = e.cx, Y = e.cy;
-        for (const [dx, dy, r] of [[0, 0, 32], [-24, 7, 22], [24, 5, 24], [6, -16, 20], [-12, -10, 16]]) {
-          const g = ctx.createRadialGradient(X + dx, Y + dy, 0, X + dx, Y + dy, r);
-          g.addColorStop(0, 'rgba(140,200,80,0.5)'); g.addColorStop(1, 'rgba(110,170,60,0)');
-          circle(X + dx, Y + dy, r, g);
-        }
-        text('HQNO', X, Y + 5, { size: 12, color: '#355a1a', align: 'center', weight: '800' });
-        break;
-      }
-      case 'lasa': { // a protease with snapping jaws; glows red when it charges
-        const wind = e.windup > 0, X = x + e.w / 2 + (wind ? Math.sin(e.t * 2.5) * 2 : 0), Y = y + e.h / 2 + 1, dir = e.vx < 0 ? -1 : 1, open = Math.abs(Math.sin(e.t * (e.angry ? 0.4 : 0.2))) * 0.5;
-        if (wind) {   // crouch and warn before the charge
-          roundRect(X - 8, Y - 38, 16, 18, 6, '#fff3e9', '#b23a48', 1.5);
-          text('!', X, Y - 24, { size: 14, color: '#b23a48', align: 'center', weight: '900' });
-        }
-        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(X, y + e.h + 1, 13, 3.5, 0, 0, TAU); ctx.fill();
-        if (e.angry) glow(X, Y, 24, '#ff3040', 0.4);
-        ball(X, Y, 12, '#f08a96', '#b23a48', '#5e1520');
-        ctx.fillStyle = '#e9e2e4';
-        for (const sgn of [-1, 1]) {
-          ctx.save(); ctx.translate(X + dir * 9, Y + 2); ctx.rotate(sgn * (0.35 + open) * dir);
-          ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(dir * 12, sgn * 2); ctx.lineTo(dir * 3, sgn * 5); ctx.closePath(); ctx.fill();
-          ctx.restore();
-        }
-        circle(X + dir * 3, Y - 4, 3, '#fff'); circle(X + dir * 4, Y - 3.5, 1.5, '#1d1d1d');
-        ctx.strokeStyle = '#3a0c14'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(X, Y - 9 + (e.angry ? 1 : 0)); ctx.lineTo(X + dir * 6, Y - 7 - (e.angry ? 1 : 0)); ctx.stroke();
-        text('LasA', X - dir * 2, Y + 8, { size: 8, color: '#fff', align: 'center', weight: '800' });
-        break;
-      }
-      case 'sidero': { // siderophore: a glowing iron-grabbing claw
-        const X = e.cx, Y = e.cy;
-        glow(X, Y, 26, '#c8e85a', 0.45);
-        ctx.strokeStyle = '#9cc21e'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
-        for (let k = 0; k < 3; k++) { const a = e.t * 0.05 + k * TAU / 3; ctx.beginPath(); ctx.arc(X, Y, 12, a, a + 1.3); ctx.stroke(); }
-        ball(X, Y, 5, '#f6ffd0', '#c8e85a', '#6f8f10');
-        break;
-      }
-      case 'vent': { // an air stone; bubbles come out of it
-        roundRect(x + 5, y + 23, 22, 9, 4, '#8d969c', '#5f676d', 1.2);
-        for (let k = 0; k < 4; k++) circle(x + 9 + k * 5, y + 27, 1.1, '#4f565b');
-        for (let k = 0; k < 3; k++) { const yy = y + 20 - ((e.t * 0.8 + k * 9) % 26); circle(x + 10 + k * 6 + Math.sin(e.t * 0.1 + k) * 1.5, yy, 1.8, 'rgba(255,255,255,0.75)'); }
-        break;
-      }
-      case 'peptide': { // a tryptic peptide (proteomics): a short chain ending in K or R
-        const yy = y + 16 + bob;
-        glow(x + 16, yy, 24, '#9fe7ff', 0.5);
-        for (let i = 0; i < 5; i++) ball(x + 4 + i * 6, yy + Math.sin(e.t * 0.1 + i) * 2.5, 3.6, '#ffffff', '#7fd4f0', '#2a7fa0');
-        ball(x + 31, yy + Math.sin(e.t * 0.1 + 5) * 2.5, 4.2, '#ffffff', '#5aa0ff', '#1d4f99');
-        text('K', x + 31, yy + 3.5 + Math.sin(e.t * 0.1 + 5) * 2.5, { size: 7, color: '#fff', align: 'center', weight: '900' });
-        break;
-      }
-      case 'psm': { // PSM power-up: little amphipathic helices
-        const yy = y + 16 + bob;
-        glow(x + 16, yy, 24, '#e88ad0', 0.45);
-        for (const [dx, dy, a] of [[-7, -2, -0.5], [6, -5, 0.4], [1, 6, -0.1]]) {
-          ctx.save(); ctx.translate(x + 16 + dx, yy + dy); ctx.rotate(a);
-          roundRect(-8, -3.5, 16, 7, 3.5, '#d65fb4', '#7c1f63', 1.2);
-          ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1;
-          for (let k = -6; k <= 6; k += 4) { ctx.beginPath(); ctx.moveTo(k, -3); ctx.lineTo(k + 2, 3); ctx.stroke(); }
-          ctx.restore();
-        }
-        text('PSM', x + 16, yy + 20, { size: 8, color: '#7c1f63', align: 'center', weight: '900' });
-        break;
-      }
-      case 'xan': { // staphyloxanthin: the golden carotenoid (a long conjugated chain)
-        const yy = y + 16 + bob;
-        glow(x + 16, yy, 28, '#ffd84a', 0.6);
-        ctx.strokeStyle = '#c98a00'; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.beginPath();
-        for (let i = 0; i <= 8; i++) { const px = x + 2 + i * 3.5, py = yy + (i % 2 ? -4 : 4); if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
-        ctx.stroke();
-        ball(x + 31, yy + 4, 4.5, '#fff6b0', '#f3c22f', '#b38a00');
-        for (let k = 0; k < 3; k++) { const a = e.t * 0.06 + k * TAU / 3; circle(x + 16 + Math.cos(a) * 16, yy + Math.sin(a) * 12, 1.8, '#fff3a0'); }
-        break;
-      }
-      case 'spring': { // a swollen cell: squishes when it throws you
-        const s = e.sq > 0 ? Math.sin(e.sq / 14 * Math.PI) : 0, X = x + 16, base = y + TILE;
-        const rx = 15 + s * 4, ry = 10 - s * 4;
-        ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.ellipse(X, base, 15, 3, 0, 0, TAU); ctx.fill();
-        const g = ctx.createRadialGradient(X - 5, base - ry - 4, 2, X, base - ry, rx);
-        g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, '#ffe7a8'); g.addColorStop(1, '#e0a52e');
-        ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(X, base - ry, rx, ry, 0, 0, TAU); ctx.fill();
-        ctx.strokeStyle = '#b07a10'; ctx.lineWidth = 2; ctx.stroke();
-        ctx.strokeStyle = 'rgba(176,122,16,0.6)'; ctx.lineWidth = 1.2;
-        for (const dx of [-6, 0, 6]) { ctx.beginPath(); ctx.moveTo(X + dx - 2, base - ry - 2); ctx.lineTo(X + dx + 2, base - ry - 2); ctx.stroke(); }
-        break;
-      }
-      case 'omv': { // outer membrane vesicle: a double-membrane bubble with cargo
-        const X = x + 16, Y = y + 16;
-        ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.beginPath(); ctx.ellipse(X, (surfaceBelow(X, y + 27) || Y + 12) + 1, 9, 2.5, 0, 0, TAU); ctx.fill();
-        const g = ctx.createRadialGradient(X - 4, Y - 5, 1, X, Y, 12);
-        g.addColorStop(0, 'rgba(255,255,255,0.8)'); g.addColorStop(0.6, 'rgba(160,190,240,0.55)'); g.addColorStop(1, 'rgba(90,120,200,0.8)');
-        circle(X, Y, 12, g);
-        ctx.strokeStyle = '#4b63b5'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X, Y, 12, 0, TAU); ctx.stroke();
-        ctx.strokeStyle = 'rgba(75,99,181,0.6)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(X, Y, 9, 0, TAU); ctx.stroke();
-        for (const [dx, dy, c] of [[-3, 2, '#e0465a'], [3, -2, '#2b6fd0'], [2, 4, '#9cc21e']]) circle(X + dx, Y + dy, 2, c);
-        break;
-      }
-      case 'lasb': { // LasB elastase: a zinc protease (teal) with jaws
-        const X = e.cx, Y = e.cy, dir = e.face || 1;
-        ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.beginPath(); ctx.ellipse(X, Y + 22, 12, 3, 0, 0, TAU); ctx.fill();
-        ball(X, Y, 12, '#a8efe5', '#2f8f86', '#124a45');
-        ctx.fillStyle = '#e9f5f3';
-        const open = Math.abs(Math.sin(e.t * 0.25)) * 0.5;
-        for (const sgn of [-1, 1]) {
-          ctx.save(); ctx.translate(X + dir * 9, Y + 2); ctx.rotate(sgn * (0.35 + open) * dir);
-          ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(dir * 11, sgn * 2); ctx.lineTo(dir * 3, sgn * 5); ctx.closePath(); ctx.fill();
-          ctx.restore();
-        }
-        circle(X - dir * 2, Y + 4, 3.2, '#b9c2c9'); text('Zn', X - dir * 2, Y + 6, { size: 5, color: '#333', align: 'center', weight: '900' });
-        circle(X + dir * 3, Y - 4, 2.8, '#fff'); circle(X + dir * 4, Y - 3.5, 1.4, '#111');
-        // little wings of motion so it reads as flying
-        ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.5;
-        for (const k of [0, 1]) { ctx.beginPath(); ctx.moveTo(X - dir * (14 + k * 5), Y - 3 + k * 6); ctx.lineTo(X - dir * (20 + k * 5), Y - 3 + k * 6); ctx.stroke(); }
-        text('LasB', X, Y - 15, { size: 8, color: '#124a45', align: 'center', weight: '900' });
-        break;
-      }
-      case 'geyser': { // rhamnolipid foam well: a pink crater that bubbles, then erupts a column
-        const X = x + 16, base = y + TILE, s = foamGeyserState(e);
-        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(X, base - 1, 14, 3.5, 0, 0, TAU); ctx.fill();
-        roundRect(x + 4, base - 8, 24, 8, 4, '#c2457f', '#7d1b4f', 1.5);
-        circle(X, base - 6, 4, '#5c0f38');
-        if (s.warn) {
-          const k = (s.ph - GEYSER_WARN) / (GEYSER_UP - GEYSER_WARN);
-          glow(X, base - 8, 18 + k * 10, '#e0458f', 0.35 + k * 0.25);
-          for (let i = 0; i < 4; i++) {
-            const bx = X - 9 + i * 6 + Math.sin(e.t * 0.4 + i) * 1.5, by = base - 10 - ((e.t * 1.3 + i * 7) % (8 + k * 14));
-            ball(bx, by, 2.5 + k * 1.5, '#ffe0ef', '#e86aa9', '#9c2763');
-          }
-          if (Math.floor(e.t / 6) % 2 === 0) text('!', X, base - 28 - k * 6, { size: 15, color: '#c2185b', align: 'center', weight: '900' });
-        } else if (s.height > 0) {
-          glow(X, base - s.height / 2, 20 + s.height * 0.3, '#e0458f', 0.3);
-          for (let yy = 0; yy < s.height; yy += 9) {
-            const sway = Math.sin(e.t * 0.25 + yy * 0.15) * 3, r = 7 - (yy / (e.h * TILE)) * 2.5;
-            ball(X - 5 + sway, base - 6 - yy, r, '#ffe0ef', '#e86aa9', '#9c2763');
-            ball(X + 5 - sway, base - 10 - yy, r - 1, '#ffe0ef', '#e86aa9', '#9c2763');
-          }
-          ball(X, base - s.height - 2, 8, '#fff0f7', '#f08cbf', '#a32a68');
-        } else for (let k = 0; k < 2; k++) circle(X - 3 + k * 6, base - 9 - ((e.t * 0.3 + k * 9) % 10), 1.8, 'rgba(240,140,190,0.7)');
-        break;
-      }
-      case 'drift': { // a drifting clump of rhamnolipid foam
-        const X = e.cx, Y = e.cy;
-        glow(X, Y, 26, '#e0458f', 0.3);
-        for (const [dx, dy, r] of [[-7, 3, 7], [6, 4, 7.5], [0, -5, 8], [-2, 7, 5], [9, -3, 5]]) {
-          const w = Math.sin(e.t * 0.12 + dx) * 1.2;
-          ball(X + dx + w, Y + dy - w, r, '#ffe0ef', '#e86aa9', '#9c2763');
-        }
-        const rise = (e.t * 0.5) % 20;
-        ctx.strokeStyle = `rgba(232,106,169,${0.7 - rise / 28})`; ctx.lineWidth = 1.2;
-        ctx.beginPath(); ctx.arc(X + 4, Y - 12 - rise, 2.2, 0, TAU); ctx.stroke();
-        break;
-      }
-      case 'hcn': { // a vent that puffs hydrogen cyanide
-        const X = x + 16, base = y + TILE;
-        roundRect(x + 6, base - 7, 20, 7, 3, '#6d6a7a', '#4a4756', 1.2);
-        circle(X, base - 6, 3.5, '#2b2833');
-        const ph = e.t % 220;
-        if (e.active || e.warn) {
-          const k = clamp(e.active ? (ph - 140) / 20 : (ph - 110) / 30 * 0.3, 0, 1);
-          for (let i = 0; i < 6; i++) {
-            const a = i * 1.1 + e.t * 0.03, rr = (14 + i * 3) * k + 4;
-            const px = X + Math.sin(a) * 14 * k, py = base - 14 - i * 9 * k;
-            const g = ctx.createRadialGradient(px, py, 0, px, py, rr);
-            g.addColorStop(0, `rgba(205,195,225,${0.55 * (e.active ? 1 : 0.6)})`); g.addColorStop(1, 'rgba(205,195,225,0)');
-            circle(px, py, rr, g);
-          }
-          if (e.active) text('HCN', X, base - 40, { size: 12, color: '#4a3d6a', align: 'center', weight: '900' });
-          else text('!', X, base - 16, { size: 14, color: '#7a5db0', align: 'center', weight: '900' });
-        } else for (let k = 0; k < 2; k++) circle(X + Math.sin(e.t * 0.05 + k * 3) * 3, base - 10 - ((e.t * 0.4 + k * 10) % 18), 2, 'rgba(205,195,225,0.5)');
-        break;
-      }
-      case 'pa': case 'twitch': { // living P. aeruginosa: a rod with a flagellum (pa) or pili (twitch)
-        const swim = e.type === 'pa';
-        const X = swim ? e.cx : e.x + 16, Y = swim ? e.cy : e.y + 24;
-        const ang = swim ? e.ang : (e.dir > 0 ? 0 : Math.PI);
-        ctx.save(); ctx.translate(X, Y); ctx.rotate(ang);
-        if (swim) {
-          ctx.strokeStyle = 'rgba(70,110,50,0.8)'; ctx.lineWidth = 1.6; ctx.beginPath();
-          for (let k = 0; k <= 16; k++) { const px = -14 - k * 1.3, py = Math.sin(k * 0.8 - e.t * 0.4) * 3; if (k) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
-          ctx.stroke();
-        } else {
-          ctx.strokeStyle = 'rgba(70,110,50,0.7)'; ctx.lineWidth = 1;
-          const ext = e.t % 50 < 16 ? 4 : 9;
-          for (const dy of [-3, 0, 3]) { ctx.beginPath(); ctx.moveTo(14, dy); ctx.lineTo(14 + ext, dy * 1.6); ctx.stroke(); }
-        }
-        const g = ctx.createLinearGradient(0, -7, 0, 7);
-        g.addColorStop(0, '#b8e6a2'); g.addColorStop(0.5, '#5fae4f'); g.addColorStop(1, '#2f6b28');
-        roundRect(-14, -7, 28, 14, 7, g, '#24521f', 1.5);
-        ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.beginPath(); ctx.ellipse(-3, -3.5, 7, 1.6, 0, 0, TAU); ctx.fill();
-        circle(7, -1, 2.6, '#fff'); circle(8, -1, 1.3, '#111');
-        ctx.restore();
-        break;
-      }
-      case 'boss': drawBoss(e); break;
-      case 'glob': {
-        const g = ctx.createRadialGradient(x + 13, y + 13, 1, x + 16, y + 16, 8);
-        g.addColorStop(0, '#cfe3ff'); g.addColorStop(1, '#1f63c0');
-        glow(x + 16, y + 16, 14, '#2b6fd0', 0.4); circle(x + 16, y + 16, 7, g);
-        break;
-      }
-      case 'rosgun': { // pyocyanin redox launcher: a barrel with phenazine rings
-        const X = x + 16, base = y + TILE, f = e.face || 1, ready = e.cool < 30;
-        roundRect(x + 3, base - 10, 26, 10, 3, '#3a4660', '#232b3d', 1.5);
-        roundRect(x + 2, y + 4, 28, 20, 8, '#2d4f8a', '#1a2f57', 2);
-        roundRect(X + f * 10 - 5, y + 8, 10, 12, 3, '#1a2f57');
-        ctx.fillStyle = 'rgba(120,170,255,0.45)'; ctx.strokeStyle = '#9cc2ff'; ctx.lineWidth = 1.2;
-        for (const dx of [-6, 0, 6]) { hexagon(X - f * 2 + dx, y + 14, 3.6, Math.PI / 6); ctx.fill(); ctx.stroke(); }
-        if (ready) glow(X + f * 16, y + 14, 14, '#ff7a3c', 0.3 + 0.3 * Math.sin(e.t * 0.4));
-        break;
-      }
-      case 'rosb': { // superoxide radical: a hot O2 with an unpaired electron and a trail
-        const X = x + 16, Y = y + 16, d = Math.sign(e.vx) || 1;
-        for (let k = 1; k <= 5; k++) circle(X - d * k * 5, Y + Math.sin(e.t * 0.5 + k) * 1.5, 6 - k, `rgba(255,${120 + k * 20},60,${0.5 - k * 0.08})`);
-        glow(X, Y, 18, '#ff5a2a', 0.45);
-        ball(X - 4, Y, 6.5, '#ffe0c8', '#ff6a3a', '#b3261e'); ball(X + 4, Y, 6.5, '#ffe0c8', '#ff6a3a', '#b3261e');
-        text('O₂', X, Y + 3.5, { size: 8, color: '#fff', align: 'center', weight: '900' });
-        circle(X + d * 10, Y - 6, 2.3, '#fff8a0');   // the unpaired electron (the "•" in O₂•⁻)
-        break;
-      }
-      case 'arrow': { // a glowing trail of arrows: this way
-        const ang = { right: 0, down: Math.PI / 2, left: Math.PI, up: -Math.PI / 2 }[e.dir] || 0;
-        ctx.save(); ctx.translate(x + 16, y + 16); ctx.rotate(ang);
-        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        for (let k = 0; k < 3; k++) {
-          const a = 0.25 + 0.75 * ((k / 3 - e.t * 0.02) % 1 + 1) % 1;
-          ctx.strokeStyle = `rgba(255,255,255,${a})`; ctx.lineWidth = 3.5;
-          ctx.beginPath(); ctx.moveTo(-9 + k * 8, -7); ctx.lineTo(-3 + k * 8, 0); ctx.lineTo(-9 + k * 8, 7); ctx.stroke();
-        }
-        ctx.restore();
-        break;
-      }
-    }
-  }
+  const kind = ENTITY[e.type];   // see entities.js
+  if (kind && kind.draw) kind.draw(e, e.x, e.y, Math.sin((e.t + e.tx * 13) * 0.08) * 3);
 }
 function drawShotsAndBubbles() {
   for (const s of L.shots) { // PSM shots: small pink helices with a trail
@@ -2930,7 +2301,7 @@ function drawHUD() {
   }
   // inhaled antibiotic warning / wave (CF)
   if (L.abWarn > 0 || L.abOn > 0) {
-    const on = L.abOn > 0, blink = Math.floor(L.time / 8) % 2 === 0;
+    const on = L.abOn > 0, blink = blinkOn(L.time);
     if (on || blink) {
       roundRect(VIEW_W / 2 - 170, VIEW_H - 78, 340, 28, 14, on ? (L.covered ? 'rgba(27,127,59,0.85)' : 'rgba(179,38,30,0.9)') : 'rgba(30,110,120,0.85)');
       text(on ? (L.covered ? 'antibiotic mist: you are covered ✓' : 'antibiotic mist: get under a floor!') : `antibiotic in ${Math.ceil(L.abWarn / 60)} s: take cover!`,
@@ -2945,28 +2316,35 @@ function drawHUD() {
     roundRect(VIEW_W / 2 - 148, VIEW_H - 30, 296 * Math.max(0, boss.hp) / boss.maxHp, 10, 5, boss.open > 0.6 ? '#ff8aa0' : '#7bd34a');
   }
   // cough warning / cough
-  if (L.coughWarn > 0 && Math.floor(L.coughWarn / 8) % 2 === 0) {
+  if (L.coughWarn > 0 && blinkOn(L.coughWarn)) {
     roundRect(VIEW_W - 230, 54, 210, 28, 14, 'rgba(179,38,30,0.85)');
     text('⚠ the patient is about to cough', VIEW_W - 125, 73, { size: 13, color: '#fff', align: 'center', weight: '800' });
   }
   if (L.coughFlash > 0) {
     ctx.save(); ctx.globalAlpha = L.coughFlash / 45;
-    ctx.fillStyle = 'rgba(255,240,240,0.25)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-    ctx.font = `900 ${60 + (45 - L.coughFlash)}px ${FONT}`; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+    // calm mode: no full-screen flash and no growing text
+    if (!G.calm) { ctx.fillStyle = 'rgba(255,240,240,0.25)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H); }
+    ctx.font = `900 ${60 + (G.calm ? 0 : 45 - L.coughFlash)}px ${FONT}`; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
     ctx.lineWidth = 8; ctx.strokeStyle = '#7a1f2b'; ctx.strokeText('COUGH!', VIEW_W / 2, 200);
     ctx.fillStyle = '#ffe3e3'; ctx.fillText('COUGH!', VIEW_W / 2, 200);
     ctx.restore();
   }
   if (G.toastT > 0 && G.toast) {
-    const lines = wrap(G.toast, 560, 16);
-    const h = lines.length * 22 + 16;
+    // Messages sit below the HUD bar, unless the cell is up there: then they move to
+    // the bottom of the view (above the boss bar and antibiotic warning) so they
+    // never cover the cell or the ledge it is jumping to.
+    const u = uiScale(), lines = wrap(G.toast, 560, 16);
+    const h = lines.length * 22 + 16, py = P.y - L.camY;
+    const low = boss || L.abWarn > 0 || L.abOn > 0 ? 92 : 44;
+    const y0 = py < 64 + (h + 40) * u ? VIEW_H - low - h * u : 58;
+    ctx.save();
     ctx.globalAlpha = Math.min(1, G.toastT / 30);
-    roundRect(VIEW_W / 2 - 285, 58, 570, h, 12, 'rgba(14,26,36,0.94)');
-    roundRect(VIEW_W / 2 - 300, 58, 5, h, [12, 0, 0, 12], rgba(S.colour, 0.8));
-    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 4;
-    lines.forEach((ln, i) => text(ln, VIEW_W / 2 + 3, 81 + i * 22, { size: 16, color: '#fff', align: 'center' }));
+    ctx.translate(VIEW_W / 2, y0); ctx.scale(u, u);
+    roundRect(-285, 0, 570, h, 12, 'rgba(14,26,36,0.94)');
+    roundRect(-300, 0, 5, h, [12, 0, 0, 12], rgba(S.colour, 0.8));
+    ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 4;
+    lines.forEach((ln, i) => text(ln, 3, 23 + i * 22, { size: 16, color: '#fff', align: 'center' }));
     ctx.restore();
-    ctx.globalAlpha = 1;
   }
 }
 
@@ -2990,16 +2368,36 @@ function panel({ title, sub = '', lines = [], footer = '', accent = '#2b5d8a', b
 }
 
 // The level's goal checklist, bottom-left. Required goals first, ★ = bonus goal.
+// It shows in full at the start of a part, for a few seconds after a goal changes
+// and while paused; otherwise it folds into a small pill so it does not cover the floor.
 function drawGoalList() {
   const gs = L.def.goals.map(g => ({ g, s: goalStatus(g) }));
-  ctx.font = `700 12px ${FONT}`;
-  const w = Math.max(...gs.map(({ g, s }) => ctx.measureText(`☐ ${s.text}${g.req ? '' : '  ★'}`).width)) + 22;
-  const h = gs.length * 20 + 12, y0 = VIEW_H - h - 34;
-  roundRect(10, y0, w + 24, h, 10, 'rgba(14,26,36,0.9)');
-  gs.forEach(({ g, s }, i) => text(`${s.done ? '☑' : '☐'} ${s.text}${g.req ? '' : '  ★'}`, 20, y0 + 21 + i * 20, { size: 13, color: s.done ? '#9be89f' : '#f4f1ea', weight: '700' }));
+  const k = G.state === 'paused' ? 1 : clamp((L.goalShowT || 0) / 30, 0, 1);
+  ctx.save();
+  ctx.translate(10, VIEW_H - 12); ctx.scale(uiScale(), uiScale());   // anchored at the bottom-left corner
+  if (k < 1) {
+    const done = gs.filter(x => x.s.done).length, label = `☑ ${done}/${gs.length} goals`;
+    ctx.globalAlpha = 1 - k;
+    ctx.font = `800 12px ${FONT}`;
+    const w = ctx.measureText(label).width + 20;
+    roundRect(0, -22, w, 22, 11, 'rgba(14,26,36,0.82)');
+    text(label, 10, -7, { size: 12, color: done === gs.length ? '#9be89f' : '#f4f1ea', weight: '800' });
+  }
+  if (k > 0) {
+    ctx.globalAlpha = k;
+    ctx.font = `700 12px ${FONT}`;
+    const w = Math.max(...gs.map(({ g, s }) => ctx.measureText(`☐ ${s.text}${g.req ? '' : '  ★'}`).width)) + 22;
+    const h = gs.length * 20 + 12;
+    roundRect(0, -h, w + 24, h, 10, 'rgba(14,26,36,0.9)');
+    gs.forEach(({ g, s }, i) => text(`${s.done ? '☑' : '☐'} ${s.text}${g.req ? '' : '  ★'}`, 10, -h + 21 + i * 20, { size: 13, color: s.done ? '#9be89f' : '#f4f1ea', weight: '700' }));
+  }
+  ctx.restore();
 }
-function goalLines(def) {
-  return def.goals.map(g => `${g.req ? '•' : '★'} ${g.id === 'time' ? goalStatus(g).text : g.label}${g.req ? '' : ' (bonus star)'}`);
+// The intro panel's goal line: required goals, then the bonus stars in short form.
+function goalSummary(def) {
+  const req = def.goals.filter(g => g.req).map(g => g.id === 'time' ? goalStatus(g).text : g.label);
+  const bonus = def.goals.filter(g => !g.req).map(g => g.short);
+  return `• ${req.join(' · ')}${bonus.length ? '   ★ ' + bonus.join(', ') : ''}`;
 }
 
 function drawStars(stars, labels, y) {
@@ -3022,8 +2420,8 @@ function drawPauseMenu() {
   menuRects().forEach((r, i) => {
     const sel = i === G.menuIdx, label = menuItems()[i];
     roundRect(r.x, r.y, r.w, r.h, 12, sel ? '#2b5d8a' : 'rgba(43,93,138,0.08)', sel ? null : 'rgba(43,93,138,0.25)', 1.5);
-    text(label, r.x + r.w / 2, r.y + 24, { size: 17, color: sel ? '#fff' : '#22303c', align: 'center', weight: sel ? '800' : '600' });
-    if (sel) text('▶', r.x + 18, r.y + 24, { size: 14, color: '#fff', weight: '900' });
+    text(label, r.x + r.w / 2, r.y + 22, { size: 16, color: sel ? '#fff' : '#22303c', align: 'center', weight: sel ? '800' : '600' });
+    if (sel) text('▶', r.x + 18, r.y + 22, { size: 14, color: '#fff', weight: '900' });
   });
   text('↑ ↓ choose · Enter / Space select · P resume', VIEW_W / 2, 466, { size: 13, color: '#6b6455', align: 'center' });
 }
@@ -3174,14 +2572,17 @@ function drawVignette() { ctx.drawImage(VIGNETTE, 0, 0); }
 
 function drawWorld() {
   const th = L.def.theme;
-  const cx = Math.round(L.cam), cy = Math.round(L.camY);
+  const cx = devicePx(L.cam), cy = devicePx(L.camY);
   // smooth shake: two mixed waves per axis instead of random jitter every frame
   const st = ++G.shakeT;
-  const sx = G.shake ? G.shake * 0.55 * (Math.sin(st * 1.7) * 0.6 + Math.sin(st * 3.1 + 1) * 0.4) : 0;
-  const sy = G.shake ? G.shake * 0.55 * (Math.sin(st * 2.3 + 2) * 0.6 + Math.sin(st * 3.7) * 0.4) : 0;
+  const shake = G.calm ? 0 : G.shake;   // no shake in calm mode
+  const sx = shake ? shake * 0.55 * (Math.sin(st * 1.7) * 0.6 + Math.sin(st * 3.1 + 1) * 0.4) : 0;
+  const sy = shake ? shake * 0.55 * (Math.sin(st * 2.3 + 2) * 0.6 + Math.sin(st * 3.7) * 0.4) : 0;
   ctx.save();
   ctx.translate(sx, sy);
   drawBackground(th, cx, cy);
+  // Fade the background towards the sky colour so the ground in front reads clearly.
+  ctx.fillStyle = rgba(th.sky[0], th.haze ?? 0.18); ctx.fillRect(-20, -20, VIEW_W + 40, VIEW_H + 40);
   drawTerrain(L.art.tiles, cx, cy);
   ctx.translate(-cx, -cy);
   drawSpecialTiles(cx, cy);
@@ -3190,6 +2591,7 @@ function drawWorld() {
   drawSigns(cx, cy);
   drawStudyStations();
   drawEntities(cx, cy);
+  drawDeathMap();
   drawDamageFeedback();
   drawGhost();
   if (G.state !== 'lysis') drawPlayer();
@@ -3209,6 +2611,7 @@ function drawWorld() {
   drawStageBanner();
   drawHUD();
   drawAbilityHUD();
+  drawDeathPanel();
   drawFlyers();
 }
 
@@ -3310,8 +2713,22 @@ function drawIntro(S) {
     });
     return;
   }
+  if (G.firstRun) {   // the very first visit: controls instead of menus
+    panel({
+      title: 'Welcome to JE2 Jump', sub: `Level 1: ${def.name} · ${def.subtitle}`,
+      lines: ['You are a golden S. aureus JE2 cell. Carry your sample to the MS.', '',
+        '← → move  ·  Space jump, press again in the air to double jump',
+        'X shoot (after a ribosome block)  ·  R back to the last stock  ·  P pause', '',
+        'Other strains, levels and modes: P, then "Main menu".'],
+      footer: 'Press Enter / Space / tap to play', accent: def.theme.accent, bodyY: 196, lineH: 30,
+    });
+    return;
+  }
   const rival = L.rival ? [`🏁 Racing a rival ghost: ${fmtTime(L.rival.secs)}`] : [];
-  panel({ title: `Level ${G.levelIdx + 1}: ${def.name}`, sub: def.subtitle, lines: def.intro.concat([''], goalLines(def), rival, [L.difficulty < 100 ? 'Study · optional biology stations · B or click to read' : L.difficulty > 100 ? 'Hard · 15% faster pace · shorter protection after hits' : `Medal times: gold ≤ ${fmtTime(medalTargets(def)[0])} · silver ≤ ${fmtTime(medalTargets(def)[1])} · bronze ≤ ${fmtTime(medalTargets(def)[2])}`, `Playing as ${S.label} (${S.title})`]), footer: 'Press Enter / Space / tap to start', accent: def.theme.accent, bodyY: 184, lineH: 25 });
+  const mode = L.difficulty < 100 ? 'Study · optional biology stations · B or click to read'
+    : L.difficulty > 100 ? 'Hard · 15% faster pace · shorter protection after hits'
+      : `gold ≤ ${fmtTime(medalTargets(def)[0])} · silver ≤ ${fmtTime(medalTargets(def)[1])} · bronze ≤ ${fmtTime(medalTargets(def)[2])}`;
+  panel({ title: `Level ${G.levelIdx + 1}: ${def.name}`, sub: def.subtitle, lines: def.intro.concat([''], [goalSummary(def)], rival, [`${S.label} (${S.title})  ·  ${mode}`]), footer: 'Press Enter / Space / tap to start', accent: def.theme.accent, bodyY: 200, lineH: 30 });
 }
 
 // n = 0: the cell has burst. A stamp, one line of statistics humour, and a bar that
@@ -3382,8 +2799,8 @@ function frame(now) {
   requestAnimationFrame(frame);
   try {
     acc += Math.min(100, now - last); last = now;
-    while (acc >= STEP_MS) { update(); acc -= STEP_MS; }
-    draw();
+    while (acc >= STEP_MS) { rememberRenderState(); update(); acc -= STEP_MS; }
+    drawInterpolated(acc / STEP_MS);
   } catch (err) {
     acc = 0;
     try { ctx.restore(); ctx.globalAlpha = 1; ctx.setTransform(canvas.width / VIEW_W, 0, 0, canvas.height / VIEW_H, 0, 0); } catch { /* best effort */ }
@@ -3391,4 +2808,5 @@ function frame(now) {
   }
 }
 AUDIO.music('title');
+if (!G.rival && !welcomed()) startFirstRun();
 requestAnimationFrame(frame);

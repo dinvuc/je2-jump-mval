@@ -205,7 +205,7 @@ check('hard runs faster, shortens hit protection and keeps separate records', ()
   run("hurt('ros','test');"); assert.equal(run('P.inv'),45); assert.equal(run('P.reps'),2);
   assert.equal(run('runKey()'),'5:TSB:anc:hard'); assert.equal(run('bestScoreKey()'),'je2jump_v3_best_hard');
   reset(1,'anc',150); assert.equal(run('L.timeLimit'),300);
-  assert.equal(run('menuItems().length'),7); run('update(); draw();'); assert.equal(run('G.state'),'play');
+  assert.equal(run('menuItems().length'),8); run('update(); draw();'); assert.equal(run('G.state'),'play');
 });
 check('lower difficulty slows the world but never the cell; normal keeps the original cadence', () => {
   const runX = {};

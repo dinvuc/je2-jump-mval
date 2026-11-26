@@ -4,6 +4,22 @@
 // the animated results screen. Everything here is decoration: none of it changes
 // collisions, routes or scoring rules.
 
+// ---- reduce motion ----------------------------------------------------------------
+// "Calm" turns off screen shake, full-screen flashes and blinking warnings (they
+// stay lit instead). It follows the system's reduce-motion setting until the player
+// changes it in the pause menu; the choice is kept in this browser.
+const CALM_KEY = 'je2jump_calm';
+function loadCalm() {
+  try { const v = localStorage.getItem(CALM_KEY); if (v === '1' || v === '0') return v === '1'; } catch { /* private mode */ }
+  try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+}
+function toggleCalm() {
+  G.calm = !G.calm;
+  try { localStorage.setItem(CALM_KEY, G.calm ? '1' : '0'); } catch { /* private mode */ }
+}
+// A blinking warning, or a steady one in calm mode.
+const blinkOn = (t, period = 8) => G.calm || Math.floor(t / period) % 2 === 0;
+
 // ---- particles ------------------------------------------------------------------
 // An expanding ring (stomps, hard landings, checkpoints, secrets).
 function ring(x, y, r0, r1, color, life = 18, width = 3) {
@@ -67,7 +83,7 @@ function drawLabels() {
     const age = t.max - t.life, s = age < 8 ? 0.6 + 0.4 * Math.sin(age / 8 * Math.PI / 2) * 1.1 : 1;
     ctx.save();
     ctx.globalAlpha = Math.min(1, t.life / 18);
-    ctx.translate(t.x, t.y); ctx.scale(s, s);
+    ctx.translate(t.x, t.y); ctx.scale(s * uiScale(), s * uiScale());
     ctx.font = `800 12px ${FONT}`;
     const w = ctx.measureText(t.text).width + 18;
     roundRect(-w / 2, -15, w, 21, 10, 'rgba(12,24,34,0.88)', rgba(t.color, 0.9), 1.5);

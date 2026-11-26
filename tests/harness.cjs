@@ -53,7 +53,7 @@ const sandbox = vm.createContext({
     getElementById: id => id === 'game' ? mainCanvas : id === 'touch' ? touch : controls[id] || null },
 });
 const run = code => vm.runInContext(code, sandbox);
-for (const file of ['facts', 'levels', 'endless', 'audio', 'runtime', 'effects', 'codex', 'share', 'modes', 'replay', 'game']) {
+for (const file of ['facts', 'levels', 'endless', 'audio', 'runtime', 'effects', 'codex', 'share', 'modes', 'replay', 'playtest', 'entities', 'game']) {
   const filename = path.join(__dirname, '..', 'js', `${file}.js`);
   new vm.Script(fs.readFileSync(filename, 'utf8'), { filename }).runInContext(sandbox);
 }

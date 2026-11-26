@@ -1,8 +1,49 @@
 # Changelog
 
-## Engagement update (25 Nov 2026)
+## Polish update (26 Nov 2026)
 
 The same entries appear in the "What's new?" lab note on the page.
+
+### Feel
+- **Jumps carry:** in the air the cell keeps more of its speed when you let go,
+  hangs for a moment at the top of a held jump and falls a little faster. The
+  jump is still about three rows high; every route was re-checked.
+- **Smooth motion on fast screens:** the cell, the camera and moving enemies are
+  drawn between physics steps, so 90, 120 and 144 Hz screens no longer judder.
+
+### A calmer screen
+- The goal checklist folds into a small pill after 5 s and reopens for a moment
+  when a goal changes (and while paused). Control reminders fade after 8 s.
+- Messages move to the bottom when the cell is high in the view.
+- The TSB background is faded back so the golden ground stands out.
+- Fixed: in SNpulse, "Reach the MS before the pulse ends" was ticked from the start.
+  The sample label above the MS no longer shows "0/1 goals" in TSB, SNpulse and SN.
+
+### First visit
+- A first visit starts TSB straight away with a short controls panel; the full
+  menu opens after the first clear (or via P → Main menu).
+- The intro panels are shorter: the medium, one goal line, strain and medal times.
+- Below the game the page lists the five main keys; the rest is behind "All controls".
+
+### Phones and comfort
+- Upright phones show "turn your phone sideways" and the game pauses.
+- Touch buttons are at least 44 px; messages, signs and labels are larger on small screens.
+- **Reduce motion** (pause menu): no screen shake, no full-screen flashes, no
+  blinking warnings. It follows the system setting by default.
+
+### Music
+- A new 8-bar B section (F G Em Am F G C C, half-time snare) alternates with the
+  theme. The boss fight keeps the A theme.
+
+### For the team
+- **Playtest heat map:** hits and falls are logged in the browser; open the game
+  with `?debug=deaths` to see them on the map and press J to copy the log as JSON.
+- **js/entities.js:** every entity type is one entry (set-up, hit box, update,
+  drawing) instead of four long switch statements in game.js. Seeded runs of all
+  map parts and strains behave identically before and after the move.
+- New checks in tests/features.test.cjs for all of the above.
+
+## Engagement update (25 Nov 2026)
 
 ### Play
 - **Instant retry:** at n = 0 the cell bursts, the world slows for a moment and

@@ -5,7 +5,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { run, reset, storage, mainCanvas } = require('./harness.cjs');
+const { run, reset, storage, mainCanvas, setDisplayWidth: setDisplayWidthLocal } = require('./harness.cjs');
 let checks = 0;
 function check(label, fn) { fn(); console.log('ok ' + (++checks) + ' - ' + label); }
 // Values from the sandbox belong to another realm: copy them out before deepEqual.
@@ -15,7 +15,7 @@ require('./routes.cjs')({ run, reset, check: () => {} });
 
 check('new scripts load in order and keep the classic, build-free page', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-  const order = ['facts', 'levels', 'endless', 'audio', 'runtime', 'effects', 'codex', 'share', 'modes', 'replay', 'game'];
+  const order = ['facts', 'levels', 'endless', 'audio', 'runtime', 'effects', 'codex', 'share', 'modes', 'replay', 'playtest', 'entities', 'game'];
   const found = [...html.matchAll(/<script src="js\/(\w+)\.js"><\/script>/g)].map(m => m[1]);
   assert.deepEqual(found, order);
   assert(!/type="module"/.test(html));
@@ -382,6 +382,117 @@ check('a dive cracks the closed boss shell; a dash slams into it', () => {
   reset(3, 'stk'); run("enterStage(1); var boss=L.ents.find(e=>e.type==='boss'); L.bossActive=true; boss.state='walk'; boss.open=1;");
   run('var b=bossBox(boss); P.x=b.x+10; P.y=b.y+20; P.dash=8; P.inv=0; updateBoss(boss, boss.bx);');
   assert.equal(run('boss.hp'), 18); assert.equal(run('P.reps'), 3);
+});
+
+// ---- polish pass: feel, smooth drawing, a calmer screen, phones, playtesting, music ----
+check('the soundtrack alternates an A and a B section; the boss theme stays on A', () => {
+  // audio.js alone, against a fake Web Audio clock that records every scheduled pitch
+  const vm = require('node:vm');
+  const pitches = [];
+  const param = track => ({ value: 0, setValueAtTime(v, t) { if (track) pitches.push([t, v]); }, exponentialRampToValueAtTime() {}, setTargetAtTime() {} });
+  const node = () => ({ gain: param(false), frequency: param(true), type: '', buffer: null, connect: x => x, start() {}, stop() {} });
+  class FakeAudio {
+    constructor() { this.currentTime = 0; this.sampleRate = 100; this.state = 'running'; this.destination = {}; }
+    createGain() { return node(); } createOscillator() { return node(); } createBiquadFilter() { return node(); }
+    createBufferSource() { return node(); } createBuffer() { return { getChannelData: () => new Float32Array(100) }; } resume() {}
+  }
+  let tick = null, ac = null;
+  const box = vm.createContext({ Math, Map, Float32Array, window: { AudioContext: function () { ac = new FakeAudio(); return ac; } },
+    localStorage: { getItem: () => null, setItem() {} }, setInterval: fn => { tick = fn; } });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'audio.js'), 'utf8') + '\nthis.AUDIO = AUDIO;', box);
+  box.AUDIO.unlock();
+  const play = (song, steps, bpm) => {
+    pitches.length = 0; box.AUDIO.music('title'); box.AUDIO.music(song);
+    const start = ac.currentTime + 0.08, sp = 60 / bpm / 4;
+    while (ac.currentTime < start + steps * sp) { ac.currentTime += 0.025; tick(); }
+    return pitches.map(([t, f]) => [Math.floor((t - start) / sp + 1e-6), Math.round(f * 10) / 10]);
+  };
+  const E1 = Math.round(440 * Math.pow(2, (28 - 69) / 12) * 10) / 10;   // the Em bass note, only in B
+  const tsb = play('TSB', 256, 116);
+  assert(tsb.some(([s, f]) => s >= 128 && s < 256 && f === E1), 'B section plays its own chords');
+  assert(!tsb.some(([s, f]) => s < 128 && f === E1), 'A section keeps C Am F G');
+  const boss = play('boss', 256, 152), first = new Set(boss.filter(([s]) => s < 128).map(p => p[1]));
+  assert(boss.every(([, f]) => first.has(f)), 'the boss loop repeats the A section');
+});
+
+check('air control, apex hang and faster falls keep the 3-row jump', () => {
+  reset(0);
+  const arc = json(`(() => { let vy = JUMP_V, y = 0, top = 0, f = 0;
+    while (f < 200) { vy = fallStep(vy, true); y += vy; f++; top = Math.min(top, y); if (y >= 0) break; }
+    return [-top, f]; })()`);
+  assert(arc[0] > 96 && arc[0] < 100, 'height stays ~3 rows: ' + arc[0]);
+  assert(arc[1] >= 39 && arc[1] <= 43, 'air time ' + arc[1]);
+  // letting go in the air keeps most of the speed; on the ground it stops quickly
+  run('P.x=10*TILE; P.y=10*TILE; P.onGround=false; P.vx=3.8; P.vy=-2; keys.right=false; keys.jump=false; P.dizzy=0; updatePlay();');
+  assert(run('P.vx') > 3.5);
+  reset(0); run('for(let i=0;i<5;i++) update(); P.vx=3.8; keys.right=false; update();');
+  assert(run('P.onGround') && run('P.vx') < 3.2);
+  // right after a hit the knockback is damped as on the ground
+  reset(0); run("P.y=10*TILE; P.onGround=false; hurt('enemy','test'); keys.left=false; keys.right=false; updatePlay();");
+  assert(run('Math.abs(P.vx)') < 2.5);
+});
+
+check('the cell and the camera are drawn between physics steps', () => {
+  reset(0); run('for(let i=0;i<5;i++) update(); rememberRenderState(); keys.right=true; for(let i=0;i<20;i++) update(); rememberRenderState(); update(); keys.right=false;');
+  const before = json('[G.prevRender.x, P.x]');
+  assert(before[1] > before[0]);
+  run('var seen=null; var realDraw=draw; draw=function(){ seen=P.x; }; drawInterpolated(0.5); draw=realDraw;');
+  assert(Math.abs(run('seen') - (before[0] + before[1]) / 2) < 0.01, 'drawn halfway');
+  assert.equal(run('P.x'), before[1], 'the real position is restored after drawing');
+  run("setState('paused'); var seen2=null; draw=function(){ seen2=P.x; }; drawInterpolated(0.5); draw=realDraw;");
+  assert.equal(run('seen2'), before[1], 'no blending outside play');
+  // enemies blend with the same alpha in Normal
+  reset(0); run('snapshotEntities(); G.alpha=0.5; draw(); G.alpha=1;');
+});
+
+check('the goal checklist folds into a pill and reopens when a goal changes', () => {
+  reset(0); assert.equal(run('L.goalShowT'), 300); assert.equal(run('L.hintT'), 480);
+  run('for(let i=0;i<400;i++) update();');
+  assert.equal(run('L.goalShowT'), 0); assert(run('L.hintT') < 100);
+  run('draw(); L.peptides=1; update();'); assert(run('L.goalShowT') > 200);
+  run("setState('paused'); draw();");
+  // SNpulse: the deadline goal is not ticked until the sample reaches the MS
+  reset(1); run('enterStage(1)');
+  assert(!run("goalStatus(L.def.goals.find(g=>g.id==='time')).done"));
+  run("var goal=L.ents.find(e=>e.type==='goal'); P.x=goal.x; P.y=goal.y;");
+  assert(run("goalStatus(L.def.goals.find(g=>g.id==='time')).done"));
+});
+
+check('messages move to the bottom when the cell is high in the view, and scale on small screens', () => {
+  reset(0); run("toast('a test message', 100); P.y=L.camY+20; draw();");
+  run("toast('a test message', 100); P.y=L.camY+300; draw();");
+  setDisplayWidthLocal(640); assert.equal(run('uiScale()'), 1.3); run('draw();');
+  setDisplayWidthLocal(960); assert.equal(run('uiScale()'), 1);
+});
+
+check('the first visit starts TSB straight away; the menu opens after the first clear', () => {
+  storage.delete('je2jump_welcomed');
+  run("G.rival=null; G.firstRun=true; setState('title');");
+  assert.equal(run('welcomed()'), true, 'opening the title marks the visit'); assert.equal(run('G.firstRun'), false);
+  storage.delete('je2jump_welcomed'); assert.equal(run('welcomed()'), false);
+  run("G.strain='stp'; G.difficulty=150; startFirstRun();");
+  assert.equal(run('G.state'), 'intro'); assert.equal(run('G.strain'), 'anc'); assert.equal(run('L.difficulty'), 100); assert.equal(run('L.def.name'), 'TSB');
+  run('draw();');
+  run("setState('play'); finishLevel();"); assert.equal(run('welcomed()'), true); assert.equal(run('G.firstRun'), false);
+});
+
+check('calm mode removes shake and flashes and is kept in the pause menu', () => {
+  reset(3); run("G.calm=false; setState('paused'); G.menuIdx=menuEntries().findIndex(e=>e[1]==='calm'); menuSelect();");
+  assert.equal(run('G.calm'), true); assert.equal(storage.get('je2jump_calm'), '1');
+  run("setState('play'); G.shake=12; L.coughFlash=30; L.coughWarn=20; draw();");
+  assert.equal(run('blinkOn(9)'), true);
+  run("setState('paused'); menuSelect();"); assert.equal(run('G.calm'), false); assert.equal(storage.get('je2jump_calm'), '0');
+});
+
+check('the playtest log records hits and falls per part and survives bad storage', () => {
+  storage.delete('je2jump_deaths_v1'); run('deathCache=null;');
+  reset(0); run("P.inv=0; hurt('enemy','test');");
+  run('P.y=L.rows*TILE+100; P.inv=0; updatePlay();');
+  const log = json('loadDeaths()');
+  assert.equal(log.length, 2); assert.equal(log[0][0], 'TSB'); assert.equal(log[0][4], 'enemy'); assert.equal(log[1][4], 'fall');
+  assert.equal(JSON.parse(storage.get('je2jump_deaths_v1')).length, 2);
+  storage.set('je2jump_deaths_v1', '{"bad":1}'); run('deathCache=null;'); assert.equal(run('loadDeaths().length'), 0);
+  run('drawDeathMap(); drawDeathPanel(); exportDeaths();');   // no-ops without ?debug=deaths
 });
 
 console.log('Passed ' + checks + ' feature checks.');

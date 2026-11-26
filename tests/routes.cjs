@@ -39,10 +39,12 @@ module.exports = function verifyRoutes({run, reset, check}) {
           P = {...node.p, vy:action.hold ? JUMP_V : 0, ride:null, sprung:false, dash:0};
           let airborne = !!action.hold;
           for (let f=0; f<action.frames; f++) {
+            // The same run, friction and gravity steps as updatePlay().
             if (action.dir) P.vx = clamp(P.vx + action.dir*RUN_ACC,-RUN_MAX,RUN_MAX);
-            else P.vx *= FRICTION;
-            if (action.hold && f >= action.hold && P.vy < -3.5) P.vy = -3.5;
-            P.vy = Math.min(P.vy+GRAV,MAX_FALL);
+            else P.vx *= P.onGround ? FRICTION : AIR_FRICTION;
+            const holding = action.hold > 0 && f < action.hold;
+            if (action.hold && !holding && P.vy < -3.5) P.vy = -3.5;
+            P.vy = fallStep(P.vy, holding);
             // Cilia and flow channels carry a grounded cell, as in the game loop.
             if (P.onGround) {
               const under = tileAt(Math.floor((P.x+P.w/2)/TILE), Math.floor((P.y+P.h+1)/TILE));
